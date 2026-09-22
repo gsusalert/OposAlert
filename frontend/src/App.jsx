@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, CheckCircle2, RefreshCw, X, Globe, Bell } from 'lucide-react';
+import { Plus, CheckCircle2, RefreshCw, X, Globe } from 'lucide-react';
+
+// URL centralizada de tu backend en Render
+const API_BASE_URL = 'https://gsusalert.onrender.com';
 
 function App() {
   const [pages, setPages] = useState([]);
@@ -12,7 +15,7 @@ function App() {
   // Obtener páginas guardadas desde el backend
   const fetchPages = async () => {
     try {
-      const res = await fetch('https://gsusalert.onrender.com');
+      const res = await fetch(`${API_BASE_URL}/api/pages`);
       if (res.ok) {
         const data = await res.json();
         setPages(data);
@@ -32,7 +35,7 @@ function App() {
     if (!name || !url) return;
     setLoading(true);
     try {
-      const res = await fetch('https://oposalert-backend.onrender.com/api/pages', {
+      const res = await fetch(`${API_BASE_URL}/api/pages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, url }),
@@ -47,7 +50,7 @@ function App() {
         alert("Error al vigilar la página: " + (data.message || "Revisa la URL"));
       }
     } catch (e) {
-      alert("No se pudo conectar con el backend (puerto 8000). Asegúrate de que uvicorn está corriendo.");
+      alert("No se pudo conectar con el servidor en Render. Comprueba que el backend esté activo o espera 30 segundos si estaba en reposo.");
     } finally {
       setLoading(false);
     }
@@ -57,11 +60,11 @@ function App() {
   const handleManualCheck = async () => {
     setChecking(true);
     try {
-      const res = await fetch('https://oposalert-backend.onrender.com/api/check', { method: 'POST' });
+      const res = await fetch(`${API_BASE_URL}/api/check`, { method: 'POST' });
       const data = await res.json();
       alert(`Comprobación finalizada.\nWebs analizadas: ${data.checked}\nCambios detectados: ${data.changes_detected.length}`);
     } catch (e) {
-      alert("Error al conectar con el servidor.");
+      alert("Error al conectar con el servidor en Render.");
     } finally {
       setChecking(false);
     }
@@ -166,7 +169,7 @@ function App() {
                 <input 
                   type="text" 
                   required
-                  placeholder="Ej: Oposiciones Auxiliar AGE" 
+                  placeholder="Ej: Convocatoria Oposiciones" 
                   value={name} 
                   onChange={(e) => setName(e.target.value)}
                   className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:outline-none focus:border-purple-600"
@@ -177,7 +180,7 @@ function App() {
                 <input 
                   type="url" 
                   required
-                  placeholder="https://sede.inap.gob.es/..." 
+                  placeholder="https://ejemplo.es/convocatorias" 
                   value={url} 
                   onChange={(e) => setUrl(e.target.value)}
                   className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:outline-none focus:border-purple-600"
