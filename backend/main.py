@@ -19,14 +19,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configuración opcional para Telegram (funciona en Render sin restricciones)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 DB_FILE = "oposalert.db"
 
+def get_db():
+    conn = sqlite3.connect(DB_FILE, timeout=20)
+    conn.row_factory = sqlite3.Row
+    return conn
+
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db()
     c = conn.cursor()
     c.execute('''
         CREATE TABLE IF NOT EXISTS pages (
@@ -57,19 +61,15 @@ class PageRequest(BaseModel):
     notify_email: str
 
 def send_alert_async(recipient: str, page_name: str, page_url: str):
-    """Envía alertas en segundo plano para que la web jamás se congele."""
     def _worker():
-        # Aviso por Telegram si las credenciales están configuradas
         if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
             try:
                 msg = f"🔔 *[OposAlert] Cambio detectado*\n\n📌 *Web:* {page_name}\n🔗 [Abrir enlace]({page_url})"
                 tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
                 requests.post(tg_url, json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=5)
-                print(f"[OK] Notificación de Telegram enviada.")
             except Exception as e:
-                print(f"[ERROR TELEGRAM]: {e}")
-        
-        print(f"[ALERTA GENERADA] Novedad en '{page_name}' ({page_url}) para destinatario: {recipient}")
+                print(f"[ERROR TG] {e}")
+        print(f"[ALERTA LISTA] Novedad en {page_name} -> Notificar a: {recipient}")
 
     threading.Thread(target=_worker, daemon=True).start()
 
@@ -77,10 +77,8 @@ def get_page_hash(url: str) -> str:
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml,application/json;q=0.9,*/*;q=0.8",
-        "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
     }
-    response = requests.get(url, headers=headers, timeout=8, allow_redirects=True)
-    
+    response = requests.get(url, headers=headers, timeout=5, allow_redirects=True)
     if response.status_code != 200:
         raise Exception(f"HTTP {response.status_code}")
 
@@ -95,26 +93,32 @@ def get_page_hash(url: str) -> str:
 
     if not cleaned_text:
         raise Exception("Sin contenido")
-        
+
     return hashlib.sha256(cleaned_text.encode("utf-8")).hexdigest()
 
 def check_all_pages_logic():
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db()
     c = conn.cursor()
     c.execute("SELECT id, name, url, notify_email, last_hash FROM pages")
-    rows = c.fetchall()
-    
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+
     detected = []
     current_time_str = time.strftime("%H:%M")
 
     for row in rows:
-        page_id, name, url, notify_email, last_hash = row
+        page_id = row["id"]
+        name = row["name"]
+        url = row["url"]
+        notify_email = row["notify_email"]
+        last_hash = row["last_hash"]
+
+        conn = get_db()
+        c = conn.cursor()
         try:
             current_hash = get_page_hash(url)
-            print(f"[CHECK] {name} -> Hash actual: {current_hash[:8]}... | Hash anterior: {str(last_hash)[:8]}...")
-            
             if last_hash and current_hash != last_hash:
-                print(f"[CAMBIO DETECTADO] ¡Hay cambios en {name}!")
+                print(f"[CAMBIO] {name} ha cambiado")
                 send_alert_async(notify_email, name, url)
                 detected.append(name)
                 c.execute(
@@ -128,11 +132,12 @@ def check_all_pages_logic():
                 )
             conn.commit()
         except Exception as e:
-            print(f"[ERROR SCRAPING] {name}: {e}")
-            c.execute("UPDATE pages SET last_checked = ? WHERE id = ?", (f"Error: {str(e)[:15]}", page_id))
+            print(f"[ERROR] {name}: {e}")
+            c.execute("UPDATE pages SET last_checked = ? WHERE id = ?", (f"Error al leer", page_id))
             conn.commit()
+        finally:
+            conn.close()
 
-    conn.close()
     return detected
 
 def background_checker():
@@ -140,10 +145,12 @@ def background_checker():
         try:
             check_all_pages_logic()
         except Exception as e:
-            print(f"[ERROR BACKGROUND]: {e}")
+            print(f"[ERROR BKG]: {e}")
         time.sleep(900)
 
 threading.Thread(target=background_checker, daemon=True).start()
+
+# --- ENDPOINTS ---
 
 @app.get("/")
 def root():
@@ -151,20 +158,20 @@ def root():
 
 @app.get("/api/pages")
 def get_pages():
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db()
     c = conn.cursor()
     c.execute("SELECT id, name, url, notify_email, last_checked, has_changed, changed_at FROM pages ORDER BY id DESC")
-    rows = c.fetchall()
+    rows = [dict(r) for r in c.fetchall()]
     conn.close()
     return [
         {
-            "id": r[0],
-            "name": r[1],
-            "url": r[2],
-            "notify_email": r[3],
-            "last_checked": r[4] or "Pendiente",
-            "has_changed": bool(r[5]),
-            "changed_at": r[6] or "Hoy"
+            "id": r["id"],
+            "name": r["name"],
+            "url": r["url"],
+            "notify_email": r["notify_email"],
+            "last_checked": r["last_checked"] or "Pendiente",
+            "has_changed": bool(r["has_changed"]),
+            "changed_at": r["changed_at"] or "Hoy"
         }
         for r in rows
     ]
@@ -173,7 +180,7 @@ def get_pages():
 def add_page(page: PageRequest):
     try:
         initial_hash = get_page_hash(page.url)
-        conn = sqlite3.connect(DB_FILE)
+        conn = get_db()
         c = conn.cursor()
         c.execute(
             "INSERT INTO pages (name, url, notify_email, last_hash, last_checked, has_changed, changed_at) VALUES (?, ?, ?, ?, ?, 0, '')",
@@ -185,14 +192,15 @@ def add_page(page: PageRequest):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-@app.post("/api/check")
+# Acepta tanto POST como GET para evitar fallos de método
+@app.api_route("/api/check", methods=["GET", "POST"])
 def manual_check():
     changes = check_all_pages_logic()
-    return {"status": "ok", "changes_detected": changes}
+    return {"status": "ok", "changes_detected": changes, "total_checked": len(changes)}
 
 @app.post("/api/pages/{page_id}/dismiss")
 def dismiss_change(page_id: int):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db()
     c = conn.cursor()
     c.execute("UPDATE pages SET has_changed = 0 WHERE id = ?", (page_id,))
     conn.commit()
@@ -201,7 +209,7 @@ def dismiss_change(page_id: int):
 
 @app.delete("/api/pages/{page_id}")
 def delete_page(page_id: int):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db()
     c = conn.cursor()
     c.execute("DELETE FROM pages WHERE id = ?", (page_id,))
     conn.commit()
