@@ -19,7 +19,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Variables de entorno en Render
+# Variables de entorno configuradas en Render
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -62,6 +62,11 @@ class PageRequest(BaseModel):
     url: str
     notify_email: str
 
+class PageUpdateRequest(BaseModel):
+    name: str
+    url: str
+    notify_email: str
+
 def send_alert_async(recipient: str, page_name: str, page_url: str):
     """Envío en segundo plano mediante Resend HTTP API y Telegram."""
     def _worker():
@@ -99,20 +104,21 @@ def send_alert_async(recipient: str, page_name: str, page_url: str):
                 tg_msg = f"🔔 *[OposAlert] Cambio detectado*\n\n📌 *Web:* {page_name}\n🔗 [Abrir enlace]({page_url})"
                 tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
                 requests.post(tg_url, json={"chat_id": TELEGRAM_CHAT_ID, "text": tg_msg, "parse_mode": "Markdown"}, timeout=5)
+                print("[OK TG] Notificación enviada por Telegram")
             except Exception as e:
                 print(f"[ERROR TG] {e}")
 
     threading.Thread(target=_worker, daemon=True).start()
 
 def fetch_url_content(url: str) -> str:
-    """Obtiene el texto de la página con fallback automático anti-403 / anti-Cloudflare."""
+    """Obtiene el texto de la página con fallback automático anti-403."""
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml,application/json;q=0.9,*/*;q=0.8",
         "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
     }
     
-    # 1. Intento directo normal
+    # Intento de lectura directa
     try:
         resp = requests.get(url, headers=headers, timeout=7, allow_redirects=True)
         if resp.status_code == 200 and len(resp.text) > 100:
@@ -120,7 +126,7 @@ def fetch_url_content(url: str) -> str:
     except Exception as e:
         print(f"[DIRECTO FALLÓ] {url}: {e}")
 
-    # 2. Si falla o da 403 (Cloudflare), usamos el bypass de lectura limpia de Jina Reader (gratuito)
+    # Fallback con bypass de lectura limpia de Jina Reader
     try:
         proxy_url = f"https://r.jina.ai/{url}"
         print(f"[BYPASS CLOUDFLARE] Consultando vía proxy: {proxy_url}")
@@ -232,12 +238,11 @@ def get_pages():
 
 @app.post("/api/pages")
 def add_page(page: PageRequest):
-    # Guardado seguro: si la web tarda o da problemas de hash al inicio, se guarda igualmente
     try:
         initial_hash = get_page_hash(page.url)
         initial_status = "Recién añadida"
     except Exception as e:
-        print(f"[AVISO AL CREAR] No se pudo leer hash inicial ({e}), guardando con hash temporal...")
+        print(f"[AVISO AL CREAR] No se pudo leer hash inicial ({e}), guardando temporal...")
         initial_hash = hashlib.sha256(f"initial_{page.url}_{time.time()}".encode("utf-8")).hexdigest()
         initial_status = "Pendiente de 1ª lectura"
 
@@ -253,6 +258,23 @@ def add_page(page: PageRequest):
         return {"status": "success"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+@app.put("/api/pages/{page_id}")
+def update_page(page_id: int, page: PageUpdateRequest):
+    try:
+        new_hash = get_page_hash(page.url)
+    except Exception:
+        new_hash = hashlib.sha256(f"initial_{page.url}_{time.time()}".encode("utf-8")).hexdigest()
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute(
+        "UPDATE pages SET name = ?, url = ?, notify_email = ?, last_hash = ?, last_checked = ? WHERE id = ?",
+        (page.name, page.url, page.notify_email, new_hash, "Modificada", page_id)
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "success"}
 
 @app.get("/api/check")
 @app.post("/api/check")
