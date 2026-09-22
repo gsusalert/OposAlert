@@ -19,7 +19,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Claves y configuración de APIs externas
+# Variables de entorno en Render
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -63,7 +63,7 @@ class PageRequest(BaseModel):
     notify_email: str
 
 def send_alert_async(recipient: str, page_name: str, page_url: str):
-    """Envía la alerta por Resend HTTP API y Telegram en segundo plano."""
+    """Envío en segundo plano mediante Resend HTTP API y Telegram."""
     def _worker():
         if RESEND_API_KEY:
             try:
@@ -79,71 +79,72 @@ def send_alert_async(recipient: str, page_name: str, page_url: str):
                         "subject": f"🔔 [OposAlert] ¡Novedad en: {page_name}!",
                         "html": f"""
                             <h2>¡Novedad detectada!</h2>
-                            <p>Se ha detectado una modificación en la página que vigilas:</p>
+                            <p>Se ha detectado una modificación en la página vigilada:</p>
                             <p><b>Web:</b> {page_name}</p>
-                            <p><a href="{page_url}" style="background-color:#7c3aed;color:white;padding:10px 15px;text-decoration:none;border-radius:6px;display:inline-block;">Ir a la convocatoria</a></p>
+                            <p><a href="{page_url}" style="background-color:#7c3aed;color:white;padding:10px 15px;text-decoration:none;border-radius:6px;display:inline-block;">Ver página</a></p>
                             <p><small>Fecha: {time.strftime('%d/%m/%Y a las %H:%M')}</small></p>
                         """
                     },
                     timeout=8
                 )
                 if res.status_code in [200, 201]:
-                    print(f"[OK EMAIL] Alerta enviada con éxito a {recipient}")
+                    print(f"[OK EMAIL] Alerta enviada a {recipient}")
                 else:
-                    print(f"[ERROR RESEND]: {res.status_code} - {res.text}")
+                    print(f"[ERROR RESEND] {res.status_code}: {res.text}")
             except Exception as e:
-                print(f"[ERROR RESEND EXCEPTION]: {e}")
-        else:
-            print("[AVISO] Configura RESEND_API_KEY en Render Environment para recibir emails.")
+                print(f"[ERROR RESEND EXCEPTION] {e}")
 
         if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
             try:
                 tg_msg = f"🔔 *[OposAlert] Cambio detectado*\n\n📌 *Web:* {page_name}\n🔗 [Abrir enlace]({page_url})"
                 tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
                 requests.post(tg_url, json={"chat_id": TELEGRAM_CHAT_ID, "text": tg_msg, "parse_mode": "Markdown"}, timeout=5)
-                print("[OK TG] Notificación de Telegram enviada")
             except Exception as e:
-                print(f"[ERROR TG]: {e}")
+                print(f"[ERROR TG] {e}")
 
     threading.Thread(target=_worker, daemon=True).start()
 
-def get_page_hash(url: str) -> str:
+def fetch_url_content(url: str) -> str:
+    """Obtiene el texto de la página con fallback automático anti-403 / anti-Cloudflare."""
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml,application/json;q=0.9,*/*;q=0.8",
         "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-        "Sec-Ch-Ua": '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"macOS"',
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
-        "Sec-Fetch-User": "?1",
-        "Upgrade-Insecure-Requests": "1",
     }
     
-    session = requests.Session()
-    response = session.get(url, headers=headers, timeout=8, allow_redirects=True)
+    # 1. Intento directo normal
+    try:
+        resp = requests.get(url, headers=headers, timeout=7, allow_redirects=True)
+        if resp.status_code == 200 and len(resp.text) > 100:
+            return resp.text
+    except Exception as e:
+        print(f"[DIRECTO FALLÓ] {url}: {e}")
+
+    # 2. Si falla o da 403 (Cloudflare), usamos el bypass de lectura limpia de Jina Reader (gratuito)
+    try:
+        proxy_url = f"https://r.jina.ai/{url}"
+        print(f"[BYPASS CLOUDFLARE] Consultando vía proxy: {proxy_url}")
+        resp_proxy = requests.get(proxy_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        if resp_proxy.status_code == 200 and len(resp_proxy.text) > 50:
+            return resp_proxy.text
+    except Exception as e:
+        print(f"[PROXY FALLÓ] {url}: {e}")
+
+    raise Exception("No se pudo obtener el contenido tras intentar acceso directo y proxy")
+
+def get_page_hash(url: str) -> str:
+    raw_content = fetch_url_content(url)
     
-    # Manejo de bloqueo Cloudflare/anti-bot (403): hash fallback para no detener la app
-    if response.status_code == 403:
-        print(f"[BLOQUEO 403] Acceso denegado por Cloudflare en: {url}")
-        return hashlib.sha256(f"cloudflare_protected_{url}_{response.status_code}".encode("utf-8")).hexdigest()
-
-    if response.status_code != 200:
-        raise Exception(f"HTTP {response.status_code}")
-
-    content_type = response.headers.get("content-type", "")
-    if "json" in content_type or not ("<html" in response.text.lower()):
-        cleaned_text = response.text.strip()
-    else:
-        soup = BeautifulSoup(response.text, "html.parser")
+    if "<html" in raw_content.lower():
+        soup = BeautifulSoup(raw_content, "html.parser")
         for tag in soup(["script", "style", "noscript", "svg", "iframe"]):
             tag.decompose()
         cleaned_text = soup.get_text(separator=" ", strip=True)
+    else:
+        cleaned_text = raw_content.strip()
 
     if not cleaned_text:
-        raise Exception("Sin contenido legible")
+        raise Exception("Contenido vacío tras procesar")
 
     return hashlib.sha256(cleaned_text.encode("utf-8")).hexdigest()
 
@@ -168,14 +169,9 @@ def check_all_pages_logic():
         c = conn.cursor()
         try:
             current_hash = get_page_hash(url)
+            print(f"[CHECK] {name} -> Hash: {current_hash[:8]}... (anterior: {str(last_hash)[:8]}...)")
             
-            # Si se generó un hash de protección Cloudflare, se marca como aviso en lugar de romper
-            if "cloudflare_protected" in current_hash:
-                c.execute(
-                    "UPDATE pages SET last_checked = ? WHERE id = ?",
-                    ("Bloqueo 403 (Cloudflare)", page_id)
-                )
-            elif last_hash and current_hash != last_hash:
+            if last_hash and current_hash != last_hash:
                 print(f"[CAMBIO DETECTADO] {name}")
                 send_alert_async(notify_email, name, url)
                 detected.append(name)
@@ -185,8 +181,8 @@ def check_all_pages_logic():
                 )
             else:
                 c.execute(
-                    "UPDATE pages SET last_checked = ? WHERE id = ?",
-                    (f"Hoy · {current_time_str}", page_id)
+                    "UPDATE pages SET last_hash = ?, last_checked = ? WHERE id = ?",
+                    (current_hash, f"Hoy · {current_time_str}", page_id)
                 )
             conn.commit()
         except Exception as e:
@@ -236,13 +232,21 @@ def get_pages():
 
 @app.post("/api/pages")
 def add_page(page: PageRequest):
+    # Guardado seguro: si la web tarda o da problemas de hash al inicio, se guarda igualmente
     try:
         initial_hash = get_page_hash(page.url)
+        initial_status = "Recién añadida"
+    except Exception as e:
+        print(f"[AVISO AL CREAR] No se pudo leer hash inicial ({e}), guardando con hash temporal...")
+        initial_hash = hashlib.sha256(f"initial_{page.url}_{time.time()}".encode("utf-8")).hexdigest()
+        initial_status = "Pendiente de 1ª lectura"
+
+    try:
         conn = get_db()
         c = conn.cursor()
         c.execute(
             "INSERT INTO pages (name, url, notify_email, last_hash, last_checked, has_changed, changed_at) VALUES (?, ?, ?, ?, ?, 0, '')",
-            (page.name, page.url, page.notify_email, initial_hash, "Recién añadida")
+            (page.name, page.url, page.notify_email, initial_hash, initial_status)
         )
         conn.commit()
         conn.close()
