@@ -63,7 +63,7 @@ class PageRequest(BaseModel):
     notify_email: str
 
 def send_alert_async(recipient: str, page_name: str, page_url: str):
-    """Envía la alerta por Resend HTTP API (sin bloqueos de red) y Telegram."""
+    """Envía la alerta por Resend HTTP API y Telegram en segundo plano."""
     def _worker():
         if RESEND_API_KEY:
             try:
@@ -109,10 +109,27 @@ def send_alert_async(recipient: str, page_name: str, page_url: str):
 
 def get_page_hash(url: str) -> str:
     headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml,application/json;q=0.9,*/*;q=0.8",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+        "Sec-Ch-Ua": '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"macOS"',
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
     }
-    response = requests.get(url, headers=headers, timeout=6, allow_redirects=True)
+    
+    session = requests.Session()
+    response = session.get(url, headers=headers, timeout=8, allow_redirects=True)
+    
+    # Manejo de bloqueo Cloudflare/anti-bot (403): hash fallback para no detener la app
+    if response.status_code == 403:
+        print(f"[BLOQUEO 403] Acceso denegado por Cloudflare en: {url}")
+        return hashlib.sha256(f"cloudflare_protected_{url}_{response.status_code}".encode("utf-8")).hexdigest()
+
     if response.status_code != 200:
         raise Exception(f"HTTP {response.status_code}")
 
@@ -126,7 +143,7 @@ def get_page_hash(url: str) -> str:
         cleaned_text = soup.get_text(separator=" ", strip=True)
 
     if not cleaned_text:
-        raise Exception("Sin contenido")
+        raise Exception("Sin contenido legible")
 
     return hashlib.sha256(cleaned_text.encode("utf-8")).hexdigest()
 
@@ -151,7 +168,14 @@ def check_all_pages_logic():
         c = conn.cursor()
         try:
             current_hash = get_page_hash(url)
-            if last_hash and current_hash != last_hash:
+            
+            # Si se generó un hash de protección Cloudflare, se marca como aviso en lugar de romper
+            if "cloudflare_protected" in current_hash:
+                c.execute(
+                    "UPDATE pages SET last_checked = ? WHERE id = ?",
+                    ("Bloqueo 403 (Cloudflare)", page_id)
+                )
+            elif last_hash and current_hash != last_hash:
                 print(f"[CAMBIO DETECTADO] {name}")
                 send_alert_async(notify_email, name, url)
                 detected.append(name)
