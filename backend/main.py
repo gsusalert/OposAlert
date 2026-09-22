@@ -1,10 +1,8 @@
 import hashlib
 import os
-import smtplib
 import sqlite3
 import threading
 import time
-from email.mime.text import MIMEText
 import requests
 from bs4 import BeautifulSoup
 from fastapi import FastAPI
@@ -13,7 +11,6 @@ from pydantic import BaseModel
 
 app = FastAPI(title="OposAlert API")
 
-# Configuración de CORS para permitir conexiones desde Vercel o local
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,17 +19,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Variables de entorno para el envío de correo (Render Environment)
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-EMAIL_USER = os.getenv("EMAIL_USER", "tu_cuenta@gmail.com")
-EMAIL_PASS = os.getenv("EMAIL_PASS", "tu_contraseña_de_aplicacion")
+# Configuración opcional para Telegram (funciona en Render sin restricciones)
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 DB_FILE = "oposalert.db"
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    # Creación de tabla base si no existe
     c.execute('''
         CREATE TABLE IF NOT EXISTS pages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,7 +40,6 @@ def init_db():
             changed_at TEXT DEFAULT ''
         )
     ''')
-    # Migración automática si faltan columnas en una base de datos ya existente
     c.execute("PRAGMA table_info(pages)")
     columns = [col[1] for col in c.fetchall()]
     if "has_changed" not in columns:
@@ -62,49 +56,34 @@ class PageRequest(BaseModel):
     url: str
     notify_email: str
 
-def send_email_alert(recipient: str, page_name: str, page_url: str):
-    if not EMAIL_USER or EMAIL_USER == "tu_cuenta@gmail.com":
-        print(f"[ALERTA] Email omitido a {recipient}: faltan configurar EMAIL_USER y EMAIL_PASS en Render.")
-        return
+def send_alert_async(recipient: str, page_name: str, page_url: str):
+    """Envía alertas en segundo plano para que la web jamás se congele."""
+    def _worker():
+        # Aviso por Telegram si las credenciales están configuradas
+        if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+            try:
+                msg = f"🔔 *[OposAlert] Cambio detectado*\n\n📌 *Web:* {page_name}\n🔗 [Abrir enlace]({page_url})"
+                tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+                requests.post(tg_url, json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=5)
+                print(f"[OK] Notificación de Telegram enviada.")
+            except Exception as e:
+                print(f"[ERROR TELEGRAM]: {e}")
+        
+        print(f"[ALERTA GENERADA] Novedad en '{page_name}' ({page_url}) para destinatario: {recipient}")
 
-    subject = f"🔔 [OposAlert] ¡Novedad detectada en: {page_name}!"
-    body = (
-        f"Hola,\n\n"
-        f"Se ha detectado una modificación o nueva publicación en la web vigilada:\n\n"
-        f"📌 Nombre: {page_name}\n"
-        f"🔗 Enlace directo: {page_url}\n\n"
-        f"Fecha y hora: {time.strftime('%d/%m/%Y a las %H:%M')}\n\n"
-        f"— Equipo OposAlert"
-    )
-
-    msg = MIMEText(body)
-    msg["Subject"] = subject
-    msg["From"] = EMAIL_USER
-    msg["To"] = recipient
-
-    try:
-        # Conexión SSL directa por puerto 465 con timeout de 8 segundos para evitar bloqueos
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=8) as server:
-            server.login(EMAIL_USER, EMAIL_PASS)
-            server.sendmail(EMAIL_USER, [recipient], msg.as_string())
-        print(f"[OK] Correo de alerta enviado exitosamente a {recipient}")
-    except Exception as e:
-        print(f"[ERROR SMTP] No se pudo enviar el correo a {recipient}: {e}")
+    threading.Thread(target=_worker, daemon=True).start()
 
 def get_page_hash(url: str) -> str:
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml,application/json;q=0.9,*/*;q=0.8",
         "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache"
     }
-    response = requests.get(url, headers=headers, timeout=12, allow_redirects=True)
+    response = requests.get(url, headers=headers, timeout=8, allow_redirects=True)
     
     if response.status_code != 200:
-        raise Exception(f"HTTP {response.status_code}: Acceso no permitido o web caída")
+        raise Exception(f"HTTP {response.status_code}")
 
-    # Si es JSON o texto plano (como httpbin.org/uuid), limpia directamente
     content_type = response.headers.get("content-type", "")
     if "json" in content_type or not ("<html" in response.text.lower()):
         cleaned_text = response.text.strip()
@@ -115,7 +94,7 @@ def get_page_hash(url: str) -> str:
         cleaned_text = soup.get_text(separator=" ", strip=True)
 
     if not cleaned_text:
-        raise Exception("El contenido de la página está vacío o bloqueado")
+        raise Exception("Sin contenido")
         
     return hashlib.sha256(cleaned_text.encode("utf-8")).hexdigest()
 
@@ -132,11 +111,11 @@ def check_all_pages_logic():
         page_id, name, url, notify_email, last_hash = row
         try:
             current_hash = get_page_hash(url)
-            print(f"[CHECK] {name} -> Hash actual: {current_hash[:8]}... | Hash guardado: {str(last_hash)[:8]}...")
+            print(f"[CHECK] {name} -> Hash actual: {current_hash[:8]}... | Hash anterior: {str(last_hash)[:8]}...")
             
             if last_hash and current_hash != last_hash:
-                print(f"[CAMBIO DETECTADO] ¡Novedad en {name}! Enviando alerta a {notify_email}...")
-                send_email_alert(notify_email, name, url)
+                print(f"[CAMBIO DETECTADO] ¡Hay cambios en {name}!")
+                send_alert_async(notify_email, name, url)
                 detected.append(name)
                 c.execute(
                     "UPDATE pages SET last_hash = ?, last_checked = ?, has_changed = 1, changed_at = ? WHERE id = ?",
@@ -149,27 +128,22 @@ def check_all_pages_logic():
                 )
             conn.commit()
         except Exception as e:
-            error_msg = f"Error: {str(e)[:30]}"
-            print(f"[FALLO SCRAPING] {name} ({url}): {e}")
-            c.execute("UPDATE pages SET last_checked = ? WHERE id = ?", (error_msg, page_id))
+            print(f"[ERROR SCRAPING] {name}: {e}")
+            c.execute("UPDATE pages SET last_checked = ? WHERE id = ?", (f"Error: {str(e)[:15]}", page_id))
             conn.commit()
 
     conn.close()
     return detected
 
-# Hilo en segundo plano que revisa periódicamente cada 15 minutos (900 segundos)
 def background_checker():
     while True:
         try:
-            print("[AUTO-CHECK] Ejecutando comprobación automática de páginas...")
             check_all_pages_logic()
         except Exception as e:
-            print(f"[ERROR AUTO-CHECK] {e}")
+            print(f"[ERROR BACKGROUND]: {e}")
         time.sleep(900)
 
 threading.Thread(target=background_checker, daemon=True).start()
-
-# --- ENDPOINTS API ---
 
 @app.get("/")
 def root():
