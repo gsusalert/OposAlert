@@ -19,7 +19,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Variables de entorno configuradas en Render
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -68,7 +67,7 @@ class PageUpdateRequest(BaseModel):
     notify_email: str
 
 def send_alert_async(recipient: str, page_name: str, page_url: str):
-    """Envío en segundo plano mediante Resend HTTP API y Telegram."""
+    """Envía la alerta por Resend HTTP API con enlace directo y control de errores."""
     def _worker():
         if RESEND_API_KEY:
             try:
@@ -83,21 +82,32 @@ def send_alert_async(recipient: str, page_name: str, page_url: str):
                         "to": [recipient],
                         "subject": f"🔔 [OposAlert] ¡Novedad en: {page_name}!",
                         "html": f"""
-                            <h2>¡Novedad detectada!</h2>
-                            <p>Se ha detectado una modificación en la página vigilada:</p>
-                            <p><b>Web:</b> {page_name}</p>
-                            <p><a href="{page_url}" style="background-color:#7c3aed;color:white;padding:10px 15px;text-decoration:none;border-radius:6px;display:inline-block;">Ver página</a></p>
-                            <p><small>Fecha: {time.strftime('%d/%m/%Y a las %H:%M')}</small></p>
+                            <div style="font-family: Arial, sans-serif; padding: 20px; color: #333; max-width: 600px; border: 1px solid #e5e7eb; border-radius: 8px;">
+                                <h2 style="color: #7c3aed; margin-top: 0;">¡Novedad detectada en OposAlert!</h2>
+                                <p>Se ha detectado una nueva publicación o cambio relevante en la siguiente página:</p>
+                                <div style="background-color: #f9fafb; padding: 15px; border-radius: 6px; margin: 15px 0;">
+                                    <p style="margin: 0 0 8px 0;"><b>Página:</b> {page_name}</p>
+                                    <p style="margin: 0;"><b>Enlace:</b> <a href="{page_url}">{page_url}</a></p>
+                                </div>
+                                <div style="margin: 25px 0;">
+                                    <a href="{page_url}" target="_blank" style="background-color: #7c3aed; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+                                        👉 Pulsar aquí para ir a la página
+                                    </a>
+                                </div>
+                                <p style="font-size: 12px; color: #6b7280; margin-top: 20px;">Fecha del aviso: {time.strftime('%d/%m/%Y a las %H:%M')}</p>
+                            </div>
                         """
                     },
                     timeout=8
                 )
                 if res.status_code in [200, 201]:
-                    print(f"[OK EMAIL] Alerta enviada a {recipient}")
+                    print(f"[OK EMAIL] Alerta enviada con éxito a {recipient}")
                 else:
-                    print(f"[ERROR RESEND] {res.status_code}: {res.text}")
+                    print(f"[ERROR RESEND] Código {res.status_code}: {res.text}")
             except Exception as e:
                 print(f"[ERROR RESEND EXCEPTION] {e}")
+        else:
+            print("[AVISO] Configura RESEND_API_KEY en Render Environment para recibir emails.")
 
         if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
             try:
@@ -111,14 +121,11 @@ def send_alert_async(recipient: str, page_name: str, page_url: str):
     threading.Thread(target=_worker, daemon=True).start()
 
 def fetch_url_content(url: str) -> str:
-    """Obtiene el texto de la página con fallback automático anti-403."""
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml,application/json;q=0.9,*/*;q=0.8",
         "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
     }
-    
-    # Intento de lectura directa
     try:
         resp = requests.get(url, headers=headers, timeout=7, allow_redirects=True)
         if resp.status_code == 200 and len(resp.text) > 100:
@@ -126,10 +133,8 @@ def fetch_url_content(url: str) -> str:
     except Exception as e:
         print(f"[DIRECTO FALLÓ] {url}: {e}")
 
-    # Fallback con bypass de lectura limpia de Jina Reader
     try:
         proxy_url = f"https://r.jina.ai/{url}"
-        print(f"[BYPASS CLOUDFLARE] Consultando vía proxy: {proxy_url}")
         resp_proxy = requests.get(proxy_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         if resp_proxy.status_code == 200 and len(resp_proxy.text) > 50:
             return resp_proxy.text
@@ -140,7 +145,6 @@ def fetch_url_content(url: str) -> str:
 
 def get_page_hash(url: str) -> str:
     raw_content = fetch_url_content(url)
-    
     if "<html" in raw_content.lower():
         soup = BeautifulSoup(raw_content, "html.parser")
         for tag in soup(["script", "style", "noscript", "svg", "iframe"]):
@@ -209,8 +213,6 @@ def background_checker():
         time.sleep(900)
 
 threading.Thread(target=background_checker, daemon=True).start()
-
-# --- ENDPOINTS ---
 
 @app.get("/")
 def root():

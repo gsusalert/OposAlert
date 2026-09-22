@@ -114,10 +114,12 @@ export default function App() {
     setFormData({ name: page.name, url: page.url, notify_email: page.notify_email });
   };
 
-  const changesCount = pages.filter(p => p.has_changed).length;
+  const changedPages = pages.filter(p => p.has_changed);
+  const changesCount = changedPages.length;
 
   return (
     <div style={{ maxWidth: 860, margin: '40px auto', padding: '0 20px', fontFamily: 'system-ui, sans-serif' }}>
+      {/* Cabecera */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ width: 40, height: 40, borderRadius: '50%', backgroundColor: '#7c3aed', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>O</div>
@@ -132,6 +134,7 @@ export default function App() {
         </button>
       </div>
 
+      {/* Contadores */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 32 }}>
         <div style={{ padding: 20, backgroundColor: '#f9fafb', borderRadius: 12, textAlign: 'center' }}>
           <div style={{ fontSize: 28, fontWeight: 800 }}>{pages.length}</div>
@@ -147,6 +150,45 @@ export default function App() {
         </div>
       </div>
 
+      {/* SECCIÓN CAMBIOS RECIENTES CON ENLACE DIRECTO */}
+      <h3 style={{ fontSize: 14, fontWeight: 700, color: '#dc2626', textTransform: 'uppercase', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+        🔴 Cambios recientes
+      </h3>
+      {changedPages.length === 0 ? (
+        <div style={{ padding: 20, border: '1px dashed #d1d5db', borderRadius: 12, textAlign: 'center', color: '#6b7280', marginBottom: 32 }}>
+          No hay publicaciones nuevas detectadas en este momento.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 32 }}>
+          {changedPages.map(page => (
+            <div key={`alert-${page.id}`} style={{ padding: 18, border: '2px solid #ef4444', borderRadius: 12, backgroundColor: '#fef2f2', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <span style={{ backgroundColor: '#dc2626', color: '#fff', fontSize: 11, padding: '2px 8px', borderRadius: 12, fontWeight: 700, textTransform: 'uppercase' }}>¡Novedad detectada!</span>
+                <h4 style={{ margin: '6px 0 2px 0', fontSize: 17, fontWeight: 700, color: '#111827' }}>{page.name}</h4>
+                <div style={{ fontSize: 12, color: '#6b7280' }}>Detectado: {page.changed_at}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <a
+                  href={page.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ padding: '9px 16px', backgroundColor: '#7c3aed', color: '#fff', textDecoration: 'none', borderRadius: 8, fontWeight: 700, fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                >
+                  🔗 Ir a la web
+                </a>
+                <button
+                  onClick={() => handleDismiss(page.id)}
+                  style={{ padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, backgroundColor: '#fff', fontSize: 13, cursor: 'pointer' }}
+                >
+                  Descartar
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* LISTA COMPLETA DE PÁGINAS */}
       <h3 style={{ fontSize: 14, fontWeight: 700, color: '#374151', textTransform: 'uppercase', marginBottom: 12 }}>Páginas vigiladas</h3>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {pages.map(page => (
@@ -161,11 +203,14 @@ export default function App() {
             </div>
 
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              {page.has_changed && (
-                <button onClick={() => handleDismiss(page.id)} style={{ padding: '6px 12px', fontSize: 12, border: '1px solid #d1d5db', borderRadius: 6, backgroundColor: '#fff', cursor: 'pointer' }}>
-                  Descartar aviso
-                </button>
-              )}
+              <a
+                href={page.url}
+                target="_blank"
+                rel="noreferrer"
+                style={{ padding: '6px 12px', fontSize: 12, border: '1px solid #e0e7ff', borderRadius: 6, backgroundColor: '#eef2ff', color: '#4338ca', textDecoration: 'none', fontWeight: 600 }}
+              >
+                🔗 Abrir
+              </a>
               <button
                 onClick={() => openEditModal(page)}
                 style={{ padding: '6px 12px', fontSize: 12, border: '1px solid #d1d5db', borderRadius: 6, backgroundColor: '#f9fafb', color: '#374151', cursor: 'pointer' }}
@@ -190,6 +235,7 @@ export default function App() {
         </button>
       </div>
 
+      {/* Modal Añadir / Modificar */}
       {(showAddModal || editingPage) && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <form
@@ -221,14 +267,14 @@ export default function App() {
               />
             </div>
             <div>
-              <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Email de aviso</label>
+              <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Email de aviso (el mismo con el que creaste Resend)</label>
               <input
                 required
                 type="email"
                 style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #d1d5db', boxSizing: 'border-box' }}
                 value={formData.notify_email}
                 onChange={e => setFormData({ ...formData, notify_email: e.target.value })}
-                placeholder="tu_correo@gmail.com"
+                placeholder="tu_correo_de_resend@gmail.com"
               />
             </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 8 }}>
