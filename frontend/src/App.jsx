@@ -12,7 +12,7 @@ function App() {
   // Obtener páginas guardadas desde el backend
   const fetchPages = async () => {
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/pages');
+      const res = await fetch('https://gsusalert.onrender.com');
       if (res.ok) {
         const data = await res.json();
         setPages(data);
@@ -32,7 +32,7 @@ function App() {
     if (!name || !url) return;
     setLoading(true);
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/pages', {
+      const res = await fetch('https://oposalert-backend.onrender.com/api/pages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, url }),
@@ -57,7 +57,7 @@ function App() {
   const handleManualCheck = async () => {
     setChecking(true);
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/check', { method: 'POST' });
+      const res = await fetch('https://oposalert-backend.onrender.com/api/check', { method: 'POST' });
       const data = await res.json();
       alert(`Comprobación finalizada.\nWebs analizadas: ${data.checked}\nCambios detectados: ${data.changes_detected.length}`);
     } catch (e) {
