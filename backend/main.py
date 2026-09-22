@@ -11,8 +11,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI()
+app = FastAPI(title="OposAlert API")
 
+# Configuración de CORS para permitir peticiones desde Vercel o local
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,6 +22,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Configuración de correo saliente
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
 EMAIL_USER = os.getenv("EMAIL_USER", "tu_cuenta@gmail.com")
@@ -31,6 +33,7 @@ DB_FILE = "oposalert.db"
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
+    # Crear tabla si no existe
     c.execute('''
         CREATE TABLE IF NOT EXISTS pages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,6 +46,13 @@ def init_db():
             changed_at TEXT DEFAULT ''
         )
     ''')
+    # Migración: Comprobar si faltan columnas en bases de datos ya existentes
+    c.execute("PRAGMA table_info(pages)")
+    columns = [col[1] for col in c.fetchall()]
+    if "has_changed" not in columns:
+        c.execute("ALTER TABLE pages ADD COLUMN has_changed INTEGER DEFAULT 0")
+    if "changed_at" not in columns:
+        c.execute("ALTER TABLE pages ADD COLUMN changed_at TEXT DEFAULT ''")
     conn.commit()
     conn.close()
 
@@ -55,17 +65,17 @@ class PageRequest(BaseModel):
 
 def send_email_alert(recipient: str, page_name: str, page_url: str):
     if not EMAIL_USER or EMAIL_USER == "tu_cuenta@gmail.com":
-        print(f"[ALERTA] Email no enviado a {recipient}: configura EMAIL_USER y EMAIL_PASS.")
+        print(f"[ALERTA] Email no enviado a {recipient}: variables EMAIL_USER y EMAIL_PASS no configuradas.")
         return
 
-    subject = f"🔔 [OposAlert] ¡Novedad en: {page_name}!"
+    subject = f"🔔 [OposAlert] ¡Novedad detectada en: {page_name}!"
     body = (
         f"Hola,\n\n"
-        f"Se ha detectado una nueva publicación o modificación en la página que vigilas:\n\n"
+        f"Se ha detectado una modificación o nueva publicación en la web vigilada:\n\n"
         f"📌 Nombre: {page_name}\n"
         f"🔗 Enlace directo: {page_url}\n\n"
-        f"Fecha: {time.strftime('%d/%m/%Y a las %H:%M')}\n\n"
-        f"— OposAlert"
+        f"Fecha y hora: {time.strftime('%d/%m/%Y a las %H:%M')}\n\n"
+        f"— Equipo OposAlert"
     )
 
     msg = MIMEText(body)
@@ -78,15 +88,18 @@ def send_email_alert(recipient: str, page_name: str, page_url: str):
             server.starttls()
             server.login(EMAIL_USER, EMAIL_PASS)
             server.sendmail(EMAIL_USER, [recipient], msg.as_string())
-        print(f"Correo de aviso enviado con éxito a {recipient}")
+        print(f"[OK] Correo de alerta enviado a {recipient}")
     except Exception as e:
-        print(f"Error al enviar correo a {recipient}: {e}")
+        print(f"[ERROR] No se pudo enviar el correo a {recipient}: {e}")
 
 def get_page_hash(url: str) -> str:
-    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
-    response = requests.get(url, headers=headers, timeout=12)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    }
+    response = requests.get(url, headers=headers, timeout=15)
     soup = BeautifulSoup(response.text, "html.parser")
-    for tag in soup(["script", "style", "noscript", "svg"]):
+    # Eliminar scripts, estilos y elementos dinámicos que causan falsos positivos
+    for tag in soup(["script", "style", "noscript", "svg", "iframe"]):
         tag.decompose()
     text = soup.get_text(separator=" ", strip=True)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -105,10 +118,9 @@ def check_all_pages_logic():
         try:
             current_hash = get_page_hash(url)
             if last_hash and current_hash != last_hash:
-                print(f"¡Cambio detectado en {name}! Enviando correo a {notify_email}...")
+                print(f"[CAMBIO DETECTADO] Novedad en '{name}'. Enviando email a {notify_email}...")
                 send_email_alert(notify_email, name, url)
                 detected.append(name)
-                # Marcamos que tiene cambios recientes
                 c.execute(
                     "UPDATE pages SET last_hash = ?, last_checked = ?, has_changed = 1, changed_at = ? WHERE id = ?",
                     (current_hash, f"Hoy · {current_time_str}", f"Hoy · {current_time_str}", page_id)
@@ -120,21 +132,29 @@ def check_all_pages_logic():
                 )
             conn.commit()
         except Exception as e:
-            print(f"Error revisando {url}: {e}")
+            print(f"[ERROR] Revisando {url}: {e}")
 
     conn.close()
     return detected
 
-# Tarea automática en segundo plano cada 15 minutos
+# Hilo en segundo plano que revisa automáticamente cada 15 minutos (900 segundos)
 def background_checker():
     while True:
         try:
+            print("[AUTO-CHECK] Ejecutando revisión programada de páginas...")
             check_all_pages_logic()
         except Exception as e:
-            print(f"Error en tarea automática: {e}")
+            print(f"[ERROR] Fallo en background_checker: {e}")
         time.sleep(900)
 
-threading.Thread(target=background_checker, daemon=True).start()
+checker_thread = threading.Thread(target=background_checker, daemon=True)
+checker_thread.start()
+
+# --- ENDPOINTS API ---
+
+@app.get("/")
+def root():
+    return {"status": "online", "app": "OposAlert API"}
 
 @app.get("/api/pages")
 def get_pages():
@@ -182,6 +202,15 @@ def dismiss_change(page_id: int):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("UPDATE pages SET has_changed = 0 WHERE id = ?", (page_id,))
+    conn.commit()
+    conn.close()
+    return {"status": "success"}
+
+@app.delete("/api/pages/{page_id}")
+def delete_page(page_id: int):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("DELETE FROM pages WHERE id = ?", (page_id,))
     conn.commit()
     conn.close()
     return {"status": "success"}
