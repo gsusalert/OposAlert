@@ -1,8 +1,10 @@
 import hashlib
 import os
+import smtplib
 import sqlite3
 import threading
 import time
+from email.mime.text import MIMEText
 import requests
 from bs4 import BeautifulSoup
 from fastapi import FastAPI
@@ -19,6 +21,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Variables de entorno configuradas en Render
+EMAIL_USER = os.getenv("EMAIL_USER", "")
+EMAIL_PASS = os.getenv("EMAIL_PASS", "")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
@@ -61,15 +66,43 @@ class PageRequest(BaseModel):
     notify_email: str
 
 def send_alert_async(recipient: str, page_name: str, page_url: str):
+    """Envía la alerta por Email y Telegram en un hilo de fondo sin congelar la web."""
     def _worker():
+        # Envío de correo por Gmail
+        if EMAIL_USER and EMAIL_PASS:
+            try:
+                subject = f"🔔 [OposAlert] ¡Novedad en: {page_name}!"
+                body = (
+                    f"Hola,\n\n"
+                    f"Se ha detectado una nueva publicación o cambio en la web que vigilas:\n\n"
+                    f"📌 Nombre: {page_name}\n"
+                    f"🔗 Enlace: {page_url}\n\n"
+                    f"Fecha: {time.strftime('%d/%m/%Y a las %H:%M')}\n\n"
+                    f"— Equipo OposAlert"
+                )
+                msg = MIMEText(body)
+                msg["Subject"] = subject
+                msg["From"] = EMAIL_USER
+                msg["To"] = recipient
+
+                with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=8) as server:
+                    server.login(EMAIL_USER, EMAIL_PASS)
+                    server.sendmail(EMAIL_USER, [recipient], msg.as_string())
+                print(f"[OK EMAIL] Alerta enviada a {recipient}")
+            except Exception as e:
+                print(f"[ERROR EMAIL]: {e}")
+        else:
+            print(f"[AVISO EMAIL] Credenciales EMAIL_USER/EMAIL_PASS no detectadas en Render.")
+
+        # Envío por Telegram (opcional)
         if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
             try:
-                msg = f"🔔 *[OposAlert] Cambio detectado*\n\n📌 *Web:* {page_name}\n🔗 [Abrir enlace]({page_url})"
+                tg_msg = f"🔔 *[OposAlert] Cambio detectado*\n\n📌 *Web:* {page_name}\n🔗 [Abrir enlace]({page_url})"
                 tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-                requests.post(tg_url, json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=5)
+                requests.post(tg_url, json={"chat_id": TELEGRAM_CHAT_ID, "text": tg_msg, "parse_mode": "Markdown"}, timeout=5)
+                print("[OK TG] Notificación de Telegram enviada")
             except Exception as e:
-                print(f"[ERROR TG] {e}")
-        print(f"[ALERTA LISTA] Novedad en {page_name} -> Notificar a: {recipient}")
+                print(f"[ERROR TG]: {e}")
 
     threading.Thread(target=_worker, daemon=True).start()
 
@@ -78,7 +111,7 @@ def get_page_hash(url: str) -> str:
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml,application/json;q=0.9,*/*;q=0.8",
     }
-    response = requests.get(url, headers=headers, timeout=5, allow_redirects=True)
+    response = requests.get(url, headers=headers, timeout=6, allow_redirects=True)
     if response.status_code != 200:
         raise Exception(f"HTTP {response.status_code}")
 
@@ -118,7 +151,7 @@ def check_all_pages_logic():
         try:
             current_hash = get_page_hash(url)
             if last_hash and current_hash != last_hash:
-                print(f"[CAMBIO] {name} ha cambiado")
+                print(f"[CAMBIO DETECTADO] {name}")
                 send_alert_async(notify_email, name, url)
                 detected.append(name)
                 c.execute(
@@ -132,8 +165,8 @@ def check_all_pages_logic():
                 )
             conn.commit()
         except Exception as e:
-            print(f"[ERROR] {name}: {e}")
-            c.execute("UPDATE pages SET last_checked = ? WHERE id = ?", (f"Error al leer", page_id))
+            print(f"[ERROR CHECK] {name}: {e}")
+            c.execute("UPDATE pages SET last_checked = ? WHERE id = ?", ("Error de lectura", page_id))
             conn.commit()
         finally:
             conn.close()
@@ -192,8 +225,9 @@ def add_page(page: PageRequest):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-# Acepta tanto POST como GET para evitar fallos de método
-@app.api_route("/api/check", methods=["GET", "POST"])
+# Acepta tanto peticiones directas en navegador (GET) como llamadas desde frontend (POST)
+@app.get("/api/check")
+@app.post("/api/check")
 def manual_check():
     changes = check_all_pages_logic()
     return {"status": "ok", "changes_detected": changes, "total_checked": len(changes)}
