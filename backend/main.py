@@ -9,7 +9,7 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="WebChangeAlert API Multi-User")
+app = FastAPI(title="WebChangeAlert Device-Isolated API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -32,10 +32,11 @@ def get_db():
 def init_db():
     conn = get_db()
     c = conn.cursor()
+    # Si la tabla ya existía, añadimos la columna device_id si no está
     c.execute('''
         CREATE TABLE IF NOT EXISTS pages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_email TEXT NOT NULL,
+            device_id TEXT NOT NULL DEFAULT '',
             name TEXT NOT NULL,
             url TEXT NOT NULL,
             notify_email TEXT NOT NULL,
@@ -45,19 +46,22 @@ def init_db():
             changed_at TEXT DEFAULT ''
         )
     ''')
+    try:
+        c.execute("ALTER TABLE pages ADD COLUMN device_id TEXT NOT NULL DEFAULT ''")
+    except Exception:
+        pass
     conn.commit()
     conn.close()
 
 init_db()
 
 class PageRequest(BaseModel):
-    user_email: str
+    device_id: str
     name: str
     url: str
     notify_email: str
 
 def send_email_alert(recipient_email: str, page_name: str, page_url: str):
-    """Envía la alerta por correo mediante la API HTTP de Brevo."""
     def _worker():
         if not BREVO_API_KEY:
             print("[AVISO] Falta BREVO_API_KEY en el entorno.")
@@ -153,11 +157,11 @@ def calculate_hash(url: str) -> str:
 
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
-def execute_check_logic(filter_user: str = None):
+def execute_check_logic(filter_device: str = None):
     conn = get_db()
     c = conn.cursor()
-    if filter_user:
-        c.execute("SELECT id, name, url, notify_email, last_hash FROM pages WHERE user_email = ?", (filter_user.strip().lower(),))
+    if filter_device:
+        c.execute("SELECT id, name, url, notify_email, last_hash FROM pages WHERE device_id = ?", (filter_device.strip(),))
     else:
         c.execute("SELECT id, name, url, notify_email, last_hash FROM pages")
     rows = [dict(r) for r in c.fetchall()]
@@ -201,7 +205,6 @@ def execute_check_logic(filter_user: str = None):
     return detected_changes
 
 def background_loop_15_minutes():
-    """El hilo en segundo plano revisa TODAS las páginas de todos los usuarios cada 15 min."""
     while True:
         try:
             execute_check_logic()
@@ -211,20 +214,20 @@ def background_loop_15_minutes():
 
 threading.Thread(target=background_loop_15_minutes, daemon=True).start()
 
-# --- RUTAS DE LA API FILTRADAS POR USUARIO ---
+# --- RUTAS ---
 
 @app.get("/")
 def health():
     return {"status": "online"}
 
 @app.get("/api/pages")
-def list_pages(user_email: str = Query(...)):
-    """Solo devuelve las páginas pertenecientes al usuario que consulta."""
+def list_pages(device_id: str = Query(...)):
+    """Solo devuelve las páginas de ese dispositivo/navegador."""
     conn = get_db()
     c = conn.cursor()
     c.execute(
-        "SELECT id, name, url, notify_email, last_checked, has_changed, changed_at FROM pages WHERE user_email = ? ORDER BY id DESC",
-        (user_email.strip().lower(),)
+        "SELECT id, name, url, notify_email, last_checked, has_changed, changed_at FROM pages WHERE device_id = ? ORDER BY id DESC",
+        (device_id.strip(),)
     )
     rows = [dict(r) for r in c.fetchall()]
     conn.close()
@@ -243,7 +246,6 @@ def list_pages(user_email: str = Query(...)):
 
 @app.post("/api/pages")
 def add_page(page: PageRequest):
-    """Guarda la página asociada al email del usuario."""
     try:
         initial_hash = calculate_hash(page.url)
         status = "Recién añadida"
@@ -255,8 +257,8 @@ def add_page(page: PageRequest):
         conn = get_db()
         c = conn.cursor()
         c.execute(
-            "INSERT INTO pages (user_email, name, url, notify_email, last_hash, last_checked, has_changed, changed_at) VALUES (?, ?, ?, ?, ?, ?, 0, '')",
-            (page.user_email.strip().lower(), page.name, page.url, page.notify_email, initial_hash, status)
+            "INSERT INTO pages (device_id, name, url, notify_email, last_hash, last_checked, has_changed, changed_at) VALUES (?, ?, ?, ?, ?, ?, 0, '')",
+            (page.device_id.strip(), page.name, page.url, page.notify_email, initial_hash, status)
         )
         conn.commit()
         conn.close()
@@ -265,9 +267,8 @@ def add_page(page: PageRequest):
         return {"status": "error", "message": str(e)}
 
 @app.post("/api/check")
-def trigger_manual_check(user_email: str = Query(None)):
-    """Comprueba solo las páginas de este usuario si se pasa el parámetro."""
-    changes = execute_check_logic(filter_user=user_email)
+def trigger_manual_check(device_id: str = Query(None)):
+    changes = execute_check_logic(filter_device=device_id)
     return {"status": "ok", "changes_detected": changes, "total": len(changes)}
 
 @app.post("/api/pages/{page_id}/dismiss")

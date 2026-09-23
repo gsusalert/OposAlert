@@ -2,18 +2,26 @@ import React, { useState, useEffect } from 'react';
 
 const API_URL = "https://gsusalert.onrender.com";
 
+// Función para obtener o generar un ID único para este dispositivo/navegador
+function getDeviceId() {
+  let id = localStorage.getItem("opos_device_id");
+  if (!id) {
+    id = 'dev_' + Math.random().toString(36).substring(2, 11) + Date.now().toString(36);
+    localStorage.setItem("opos_device_id", id);
+  }
+  return id;
+}
+
 export default function App() {
-  const [currentUser, setCurrentUser] = useState(() => localStorage.getItem("opos_user_email") || "");
-  const [loginInput, setLoginInput] = useState("");
+  const [deviceId] = useState(getDeviceId);
   const [pages, setPages] = useState([]);
   const [checking, setChecking] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ name: '', url: '', notify_email: '' });
 
   const loadPages = async () => {
-    if (!currentUser) return;
     try {
-      const res = await fetch(`${API_URL}/api/pages?user_email=${encodeURIComponent(currentUser)}`);
+      const res = await fetch(`${API_URL}/api/pages?device_id=${encodeURIComponent(deviceId)}`);
       const data = await res.json();
       if (Array.isArray(data)) {
         setPages(data);
@@ -27,26 +35,12 @@ export default function App() {
     loadPages();
     const interval = setInterval(loadPages, 30000);
     return () => clearInterval(interval);
-  }, [currentUser]);
-
-  const handleLogin = (e) => {
-    e.preventDefault();
-    if (!loginInput.trim()) return;
-    const cleanEmail = loginInput.trim().toLowerCase();
-    localStorage.setItem("opos_user_email", cleanEmail);
-    setCurrentUser(cleanEmail);
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem("opos_user_email");
-    setCurrentUser("");
-    setPages([]);
-  };
+  }, [deviceId]);
 
   const handleManualCheck = async () => {
     setChecking(true);
     try {
-      const res = await fetch(`${API_URL}/api/check?user_email=${encodeURIComponent(currentUser)}`, { method: 'POST' });
+      const res = await fetch(`${API_URL}/api/check?device_id=${encodeURIComponent(deviceId)}`, { method: 'POST' });
       const data = await res.json();
       alert(`Comprobación finalizada. Cambios detectados: ${data.changes_detected ? data.changes_detected.length : 0}`);
       await loadPages();
@@ -64,16 +58,16 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_email: currentUser,
+          device_id: deviceId,
           name: form.name,
           url: form.url,
-          notify_email: form.notify_email || currentUser
+          notify_email: form.notify_email
         })
       });
       const data = await res.json();
       if (data.status === 'success') {
         setShowModal(false);
-        setForm({ name: '', url: '', notify_email: '' });
+        setForm({ name: '', url: '', notify_email: form.notify_email });
         loadPages();
       } else {
         alert("Error: " + data.message);
@@ -94,49 +88,18 @@ export default function App() {
     loadPages();
   };
 
-  // PANTALLA DE ACCESO SI NO ESTÁ IDENTIFICADO
-  if (!currentUser) {
-    return (
-      <div style={{ maxWidth: 440, margin: '100px auto', padding: 32, fontFamily: 'system-ui, -apple-system, sans-serif', border: '1px solid #e5e7eb', borderRadius: 16, backgroundColor: '#ffffff', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.05)' }}>
-        <h2 style={{ margin: '0 0 8px 0', fontSize: 22, fontWeight: 800, color: '#111827' }}>Acceso a tu Panel Privado</h2>
-        <p style={{ margin: '0 0 24px 0', fontSize: 14, color: '#6b7280' }}>
-          Introduce tu correo electrónico. Cada usuario accede únicamente a sus propias páginas y alertas.
-        </p>
-        <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div>
-            <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Tu Correo Electrónico</label>
-            <input
-              type="email"
-              required
-              placeholder="tu@email.com"
-              value={loginInput}
-              onChange={(e) => setLoginInput(e.target.value)}
-              style={{ width: '100%', padding: '12px 14px', borderRadius: 8, border: '1px solid #d1d5db', boxSizing: 'border-box', fontSize: 15 }}
-            />
-          </div>
-          <button
-            type="submit"
-            style={{ padding: '12px', backgroundColor: '#dc2626', color: '#ffffff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 15, cursor: 'pointer', marginTop: 6 }}
-          >
-            Entrar a mis alertas
-          </button>
-        </form>
-      </div>
-    );
-  }
-
   const alteredPages = pages.filter(p => p.has_changed);
 
   return (
     <div style={{ maxWidth: 840, margin: '40px auto', padding: '0 20px', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
       
-      {/* Barra superior con identificación de usuario */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, borderBottom: '1px solid #f3f4f6', paddingBottom: 16 }}>
+      {/* Cabecera directa sin logins */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: '#111827' }}>Monitor de Páginas Web</h1>
-          <div style={{ margin: '4px 0 0', fontSize: 13, color: '#4b5563' }}>
-            Sesión activa: <b>{currentUser}</b> · <button onClick={handleLogout} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', padding: 0, textDecoration: 'underline', fontSize: 13 }}>Cambiar de usuario</button>
-          </div>
+          <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>
+            Actualización automática programada cada 15 minutos
+          </p>
         </div>
         <button
           onClick={handleManualCheck}
@@ -147,7 +110,7 @@ export default function App() {
         </button>
       </div>
 
-      {/* RECUADRO ROJO DESTACADO */}
+      {/* RECUADRO ROJO DESTACADO (Solo si este dispositivo tiene avisos) */}
       {alteredPages.length > 0 && (
         <div style={{ marginBottom: 32 }}>
           <h2 style={{ fontSize: 14, fontWeight: 800, color: '#b91c1c', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
@@ -211,16 +174,13 @@ export default function App() {
         </div>
       )}
 
-      {/* Lista privada de páginas */}
+      {/* Lista de páginas bajo seguimiento */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <h2 style={{ fontSize: 15, fontWeight: 700, color: '#374151', textTransform: 'uppercase', margin: 0 }}>
-          Tus páginas monitorizadas ({pages.length})
+          Páginas bajo seguimiento ({pages.length})
         </h2>
         <button
-          onClick={() => {
-            setForm({ name: '', url: '', notify_email: currentUser });
-            setShowModal(true);
-          }}
+          onClick={() => setShowModal(true)}
           style={{ padding: '8px 16px', backgroundColor: '#111827', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: 'pointer' }}
         >
           + Añadir nueva web
@@ -229,8 +189,9 @@ export default function App() {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {pages.length === 0 ? (
-          <div style={{ padding: 32, textAlign: 'center', border: '1px dashed #d1d5db', borderRadius: 12, color: '#6b7280' }}>
-            No tienes páginas monitorizadas en tu cuenta todavía. Pulsa el botón superior para añadir una.
+          <div style={{ padding: 48, textAlign: 'center', border: '1px dashed #d1d5db', borderRadius: 12, color: '#6b7280' }}>
+            <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#374151' }}>Aún no tienes páginas añadidas en este dispositivo.</p>
+            <p style={{ margin: '6px 0 0', fontSize: 13 }}>Pulsa en <b>"+ Añadir nueva web"</b> para comenzar a monitorizar cambios y recibir avisos.</p>
           </div>
         ) : (
           pages.map(page => (
@@ -252,7 +213,7 @@ export default function App() {
                   {page.url}
                 </a>
                 <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>
-                  ✉️ Aviso a: {page.notify_email} · Última comprobación: {page.last_checked}
+                  ✉️ {page.notify_email} · Última comprobación: {page.last_checked}
                 </div>
               </div>
 
@@ -277,22 +238,22 @@ export default function App() {
         )}
       </div>
 
-      {/* Modal */}
+      {/* Modal para añadir página */}
       {showModal && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
           <form
             onSubmit={handleAddSubmit}
             style={{ backgroundColor: '#ffffff', padding: 28, borderRadius: 16, width: '100%', maxWidth: 440, display: 'flex', flexDirection: 'column', gap: 16 }}
           >
-            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Añadir página a tu monitorización</h3>
+            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Añadir página a monitorizar</h3>
             <div>
-              <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Nombre identificativo</label>
+              <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Nombre de la página</label>
               <input
                 required
                 style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #d1d5db', boxSizing: 'border-box' }}
                 value={form.name}
                 onChange={e => setForm({ ...form, name: e.target.value })}
-                placeholder="Ej. Convocatoria Oposición"
+                placeholder="Ej. BOE Convocatorias"
               />
             </div>
             <div>
@@ -314,7 +275,7 @@ export default function App() {
                 style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #d1d5db', boxSizing: 'border-box' }}
                 value={form.notify_email}
                 onChange={e => setForm({ ...form, notify_email: e.target.value })}
-                placeholder="correo@destino.com"
+                placeholder="tu@email.com"
               />
             </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 8 }}>
@@ -329,7 +290,7 @@ export default function App() {
                 type="submit"
                 style={{ padding: '8px 16px', borderRadius: 8, background: '#dc2626', color: '#fff', border: 'none', fontWeight: 600, cursor: 'pointer' }}
               >
-                Guardar en mi cuenta
+                Guardar web
               </button>
             </div>
           </form>
