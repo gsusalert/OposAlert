@@ -5,11 +5,11 @@ import threading
 import time
 import requests
 from bs4 import BeautifulSoup
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="WebChangeAlert API")
+app = FastAPI(title="WebChangeAlert API Multi-User")
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,6 +35,7 @@ def init_db():
     c.execute('''
         CREATE TABLE IF NOT EXISTS pages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_email TEXT NOT NULL,
             name TEXT NOT NULL,
             url TEXT NOT NULL,
             notify_email TEXT NOT NULL,
@@ -50,12 +51,13 @@ def init_db():
 init_db()
 
 class PageRequest(BaseModel):
+    user_email: str
     name: str
     url: str
     notify_email: str
 
 def send_email_alert(recipient_email: str, page_name: str, page_url: str):
-    """Envía la alerta por email mediante la API HTTP de Brevo."""
+    """Envía la alerta por correo mediante la API HTTP de Brevo."""
     def _worker():
         if not BREVO_API_KEY:
             print("[AVISO] Falta BREVO_API_KEY en el entorno.")
@@ -119,7 +121,6 @@ def fetch_content(url: str) -> str:
         "Pragma": "no-cache",
     }
 
-    # 1. Petición directa a la URL limpia
     try:
         r = requests.get(url, headers=headers, timeout=8, allow_redirects=True)
         if r.status_code == 200 and r.text.strip():
@@ -127,7 +128,6 @@ def fetch_content(url: str) -> str:
     except Exception as e:
         print(f"[DIRECTO FALLÓ] {url}: {e}")
 
-    # 2. Proxy de respaldo para sortear restricciones
     try:
         proxy_url = f"https://api.allorigins.win/raw?url={requests.utils.quote(url)}"
         r_proxy = requests.get(proxy_url, headers=headers, timeout=10)
@@ -153,10 +153,13 @@ def calculate_hash(url: str) -> str:
 
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
-def execute_check_logic():
+def execute_check_logic(filter_user: str = None):
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT id, name, url, notify_email, last_hash FROM pages")
+    if filter_user:
+        c.execute("SELECT id, name, url, notify_email, last_hash FROM pages WHERE user_email = ?", (filter_user.strip().lower(),))
+    else:
+        c.execute("SELECT id, name, url, notify_email, last_hash FROM pages")
     rows = [dict(r) for r in c.fetchall()]
     conn.close()
 
@@ -174,8 +177,6 @@ def execute_check_logic():
         c = conn.cursor()
         try:
             current_hash = calculate_hash(url)
-            print(f"[CHECK] {name} -> Hash actual: {current_hash[:8]}... (previo: {str(last_hash)[:8]}...)")
-            
             if last_hash and current_hash != last_hash:
                 print(f"[CAMBIO DETECTADO] {name}")
                 send_email_alert(notify_email, name, url)
@@ -200,7 +201,7 @@ def execute_check_logic():
     return detected_changes
 
 def background_loop_15_minutes():
-    """Ejecuta la comprobación cada 15 minutos (900 segundos)."""
+    """El hilo en segundo plano revisa TODAS las páginas de todos los usuarios cada 15 min."""
     while True:
         try:
             execute_check_logic()
@@ -210,17 +211,21 @@ def background_loop_15_minutes():
 
 threading.Thread(target=background_loop_15_minutes, daemon=True).start()
 
-# --- RUTAS DE LA API ---
+# --- RUTAS DE LA API FILTRADAS POR USUARIO ---
 
 @app.get("/")
 def health():
     return {"status": "online"}
 
 @app.get("/api/pages")
-def list_pages():
+def list_pages(user_email: str = Query(...)):
+    """Solo devuelve las páginas pertenecientes al usuario que consulta."""
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT id, name, url, notify_email, last_checked, has_changed, changed_at FROM pages ORDER BY id DESC")
+    c.execute(
+        "SELECT id, name, url, notify_email, last_checked, has_changed, changed_at FROM pages WHERE user_email = ? ORDER BY id DESC",
+        (user_email.strip().lower(),)
+    )
     rows = [dict(r) for r in c.fetchall()]
     conn.close()
     return [
@@ -238,6 +243,7 @@ def list_pages():
 
 @app.post("/api/pages")
 def add_page(page: PageRequest):
+    """Guarda la página asociada al email del usuario."""
     try:
         initial_hash = calculate_hash(page.url)
         status = "Recién añadida"
@@ -249,8 +255,8 @@ def add_page(page: PageRequest):
         conn = get_db()
         c = conn.cursor()
         c.execute(
-            "INSERT INTO pages (name, url, notify_email, last_hash, last_checked, has_changed, changed_at) VALUES (?, ?, ?, ?, ?, 0, '')",
-            (page.name, page.url, page.notify_email, initial_hash, status)
+            "INSERT INTO pages (user_email, name, url, notify_email, last_hash, last_checked, has_changed, changed_at) VALUES (?, ?, ?, ?, ?, ?, 0, '')",
+            (page.user_email.strip().lower(), page.name, page.url, page.notify_email, initial_hash, status)
         )
         conn.commit()
         conn.close()
@@ -258,10 +264,10 @@ def add_page(page: PageRequest):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-@app.get("/api/check")
 @app.post("/api/check")
-def trigger_manual_check():
-    changes = execute_check_logic()
+def trigger_manual_check(user_email: str = Query(None)):
+    """Comprueba solo las páginas de este usuario si se pasa el parámetro."""
+    changes = execute_check_logic(filter_user=user_email)
     return {"status": "ok", "changes_detected": changes, "total": len(changes)}
 
 @app.post("/api/pages/{page_id}/dismiss")
