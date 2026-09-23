@@ -32,7 +32,6 @@ def get_db():
 def init_db():
     conn = get_db()
     c = conn.cursor()
-    # Si la tabla ya existía, añadimos la columna device_id si no está
     c.execute('''
         CREATE TABLE IF NOT EXISTS pages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -214,7 +213,7 @@ def background_loop_15_minutes():
 
 threading.Thread(target=background_loop_15_minutes, daemon=True).start()
 
-# --- RUTAS ---
+# --- RUTAS DE LA API ---
 
 @app.get("/")
 def health():
@@ -222,7 +221,10 @@ def health():
 
 @app.get("/api/pages")
 def list_pages(device_id: str = Query(...)):
-    """Solo devuelve las páginas de ese dispositivo/navegador."""
+    """Solo devuelve las páginas vinculadas estrictamente a este device_id."""
+    if not device_id or not device_id.strip():
+        return []
+
     conn = get_db()
     c = conn.cursor()
     c.execute(
@@ -279,6 +281,16 @@ def dismiss_change_alert(page_id: int):
     conn.commit()
     conn.close()
     return {"status": "success"}
+
+# RUTA ESTÁTICA DE RESET (debe colocarse ANTES de /{page_id} para evitar colisión de tipos)
+@app.delete("/api/pages/reset/all")
+def reset_all_pages():
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("DELETE FROM pages")
+    conn.commit()
+    conn.close()
+    return {"status": "base de datos vaciada con exito"}
 
 @app.delete("/api/pages/{page_id}")
 def delete_page(page_id: int):
