@@ -104,31 +104,26 @@ def send_email_alert(recipient_email: str, page_name: str, page_url: str):
     threading.Thread(target=_worker, daemon=True).start()
 
 def fetch_content(url: str) -> str:
-    """Descarga el contenido forzando la anulación de caché tanto local como de servidores intermedios."""
-    separator = "&" if "?" in url else "?"
-    nocache_url = f"{url}{separator}_t={int(time.time())}"
-
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml,application/json;q=0.9,*/*;q=0.8",
         "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Cache-Control": "no-cache",
         "Pragma": "no-cache",
-        "Expires": "0"
     }
 
-    # 1. Petición directa anti-caché
+    # 1. Petición directa a la URL limpia sin modificar parámetros
     try:
-        r = requests.get(nocache_url, headers=headers, timeout=8, allow_redirects=True)
+        r = requests.get(url, headers=headers, timeout=8, allow_redirects=True)
         if r.status_code == 200 and r.text.strip():
             return r.text
     except Exception as e:
         print(f"[DIRECTO FALLÓ] {url}: {e}")
 
-    # 2. Proxy renderizador para webs protegidas por Cloudflare o con caché persistente
+    # 2. Proxy de respaldo para sortear bloqueos de IP
     try:
-        proxy_url = f"https://r.jina.ai/{url}"
-        r_proxy = requests.get(proxy_url, headers={"User-Agent": "Mozilla/5.0", "Cache-Control": "no-cache"}, timeout=12)
+        proxy_url = f"https://api.allorigins.win/raw?url={requests.utils.quote(url)}"
+        r_proxy = requests.get(proxy_url, headers=headers, timeout=10)
         if r_proxy.status_code == 200 and r_proxy.text.strip():
             return r_proxy.text
     except Exception as e:
