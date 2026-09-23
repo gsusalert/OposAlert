@@ -20,7 +20,7 @@ app.add_middleware(
 )
 
 BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
-SENDER_EMAIL = os.getenv("SENDER_EMAIL", "")
+SENDER_EMAIL = os.getenv("SENDER_EMAIL", "gsusalert@gmail.com")
 
 DB_FILE = "web_alerts.db"
 
@@ -55,30 +55,37 @@ class PageRequest(BaseModel):
     notify_email: str
 
 def send_email_alert(recipient_email: str, page_name: str, page_url: str):
-    """Envía el correo mediante Brevo HTTP API (funciona con cualquier destinatario)."""
+    """Envía la alerta por email mediante la API HTTP de Brevo."""
     def _worker():
-        if not BREVO_API_KEY or not SENDER_EMAIL:
-            print("[AVISO] Faltan variables BREVO_API_KEY o SENDER_EMAIL en el entorno.")
+        if not BREVO_API_KEY:
+            print("[AVISO] Falta BREVO_API_KEY en el entorno.")
             return
 
         payload = {
-            "sender": {"name": "WebChangeAlert", "email": SENDER_EMAIL},
+            "sender": {
+                "name": "OposAlert",
+                "email": SENDER_EMAIL
+            },
+            "replyTo": {
+                "name": "OposAlert Soporte",
+                "email": SENDER_EMAIL
+            },
             "to": [{"email": recipient_email.strip()}],
-            "subject": f"🔔 ¡Cambio detectado en {page_name}!",
+            "subject": f"🔔 ¡Novedad detectada en: {page_name}!",
             "htmlContent": f"""
                 <div style="font-family: Arial, sans-serif; padding: 24px; color: #1f2937; max-width: 600px; border: 1px solid #e5e7eb; border-radius: 8px;">
-                    <h2 style="color: #dc2626; margin-top: 0;">¡Novedad detectada!</h2>
+                    <h2 style="color: #dc2626; margin-top: 0;">¡Novedad detectada en OposAlert!</h2>
                     <p>Se ha identificado una actualización en la página que estás monitorizando:</p>
                     <div style="background-color: #f9fafb; padding: 16px; border-radius: 6px; margin: 16px 0; border: 1px solid #f3f4f6;">
-                        <p style="margin: 0 0 8px 0;"><b>Nombre:</b> {page_name}</p>
+                        <p style="margin: 0 0 8px 0;"><b>Página:</b> {page_name}</p>
                         <p style="margin: 0;"><b>Enlace:</b> <a href="{page_url}">{page_url}</a></p>
                     </div>
                     <div style="margin: 24px 0;">
                         <a href="{page_url}" target="_blank" style="background-color: #dc2626; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
-                            🔗 Ver novedades en la web
+                            👉 Pulsar aquí para ir a la página
                         </a>
                     </div>
-                    <p style="font-size: 12px; color: #6b7280; margin-top: 24px;">Fecha de comprobación: {time.strftime('%d/%m/%Y a las %H:%M')}</p>
+                    <p style="font-size: 12px; color: #6b7280; margin-top: 24px;">Fecha del aviso: {time.strftime('%d/%m/%Y a las %H:%M')}</p>
                 </div>
             """
         }
@@ -112,7 +119,7 @@ def fetch_content(url: str) -> str:
         "Pragma": "no-cache",
     }
 
-    # 1. Petición directa a la URL limpia sin modificar parámetros
+    # 1. Petición directa a la URL limpia
     try:
         r = requests.get(url, headers=headers, timeout=8, allow_redirects=True)
         if r.status_code == 200 and r.text.strip():
@@ -120,7 +127,7 @@ def fetch_content(url: str) -> str:
     except Exception as e:
         print(f"[DIRECTO FALLÓ] {url}: {e}")
 
-    # 2. Proxy de respaldo para sortear bloqueos de IP
+    # 2. Proxy de respaldo para sortear restricciones
     try:
         proxy_url = f"https://api.allorigins.win/raw?url={requests.utils.quote(url)}"
         r_proxy = requests.get(proxy_url, headers=headers, timeout=10)
@@ -129,7 +136,7 @@ def fetch_content(url: str) -> str:
     except Exception as e:
         print(f"[PROXY FALLÓ] {url}: {e}")
 
-    raise Exception("No se pudo obtener el contenido")
+    raise Exception("No se pudo obtener el contenido de la URL")
 
 def calculate_hash(url: str) -> str:
     raw = fetch_content(url)
