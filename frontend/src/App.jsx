@@ -74,12 +74,12 @@ export default function App() {
 
       if (data.newAdditionsCount && data.newAdditionsCount > 0) {
         setNotification({ 
-          text: `¡Atención! Se ha añadido información nueva en ${data.newAdditionsCount} página(s).`, 
+          text: `¡Atención! Se ha añadido información en ${data.newAdditionsCount} página(s).`, 
           type: "success" 
         });
       } else {
         setNotification({ 
-          text: "Comprobación finalizada: No se ha detectado contenido nuevo.", 
+          text: "Sin novedades: No hay contenido nuevo.", 
           type: "neutral" 
         });
       }
@@ -143,542 +143,636 @@ export default function App() {
   const displayedPages = filter === 'alerts' ? alteredPages : pages;
 
   return (
-    <div style={{
-      display: 'flex',
-      minHeight: '100vh',
-      backgroundColor: '#000000',
-      color: '#ffffff',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Circular Spotify Text", Roboto, Helvetica, Arial, sans-serif'
-    }}>
-      
-      {/* BARRA LATERAL ESTILO SPOTIFY */}
-      <aside style={{
-        width: 250,
-        backgroundColor: '#121212',
-        borderRadius: 8,
-        margin: '8px 0 8px 8px',
-        padding: '24px 16px',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        flexShrink: 0
-      }}>
-        <div>
-          {/* Logo */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 8px', marginBottom: 28 }}>
-            <div style={{
-              width: 32,
-              height: 32,
-              borderRadius: '50%',
-              backgroundColor: '#1ed760',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 900,
-              color: '#000'
-            }}>
-              ⚡
+    <>
+      {/* Reglas CSS de adaptación para pantallas pequeñas (móviles) */}
+      <style>{`
+        .app-container {
+          display: flex;
+          min-height: 100vh;
+          background-color: #000000;
+          color: #ffffff;
+          font-family: -apple-system, BlinkMacSystemFont, "Circular Spotify Text", Roboto, Helvetica, Arial, sans-serif;
+          flex-direction: row;
+        }
+
+        .sidebar {
+          width: 250px;
+          background-color: #121212;
+          border-radius: 8px;
+          margin: 8px 0 8px 8px;
+          padding: 24px 16px;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          flex-shrink: 0;
+        }
+
+        .main-content {
+          flex: 1;
+          background-color: #121212;
+          border-radius: 8px;
+          margin: 8px;
+          overflow-y: auto;
+          display: flex;
+          flex-direction: column;
+        }
+
+        .header-bar {
+          position: sticky;
+          top: 0;
+          background-color: rgba(18, 18, 18, 0.92);
+          backdrop-filter: blur(10px);
+          padding: 16px 32px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          z-index: 10;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+          gap: 12px;
+        }
+
+        .content-body {
+          padding: 24px 32px 64px;
+        }
+
+        .grid-cards {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+          gap: 24px;
+        }
+
+        /* MEDIA QUERIES PARA MÓVILES (Menos de 768px de ancho) */
+        @media (max-width: 768px) {
+          .app-container {
+            flex-direction: column;
+          }
+
+          .sidebar {
+            width: auto;
+            margin: 8px 8px 0 8px;
+            padding: 16px;
+            border-radius: 8px;
+          }
+
+          .sidebar-info {
+            display: none;
+          }
+
+          .sidebar-box {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 12px !important;
+            padding: 12px !important;
+          }
+
+          .sidebar-box-desc {
+            display: none;
+          }
+
+          .sidebar-box-title {
+            margin-bottom: 0 !important;
+          }
+
+          .main-content {
+            margin: 8px;
+          }
+
+          .header-bar {
+            padding: 12px 16px;
+            flex-direction: column;
+            align-items: stretch;
+          }
+
+          .header-status {
+            font-size: 12px !important;
+            margin-bottom: 4px;
+          }
+
+          .header-actions {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          }
+
+          .content-body {
+            padding: 16px 16px 48px;
+          }
+
+          .grid-cards {
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 14px;
+          }
+        }
+      `}</style>
+
+      <div className="app-container">
+        
+        {/* BARRA LATERAL (SE ADAPTA EN MÓVIL) */}
+        <aside className="sidebar">
+          <div>
+            {/* Logo */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 8px', marginBottom: 20 }}>
+              <div style={{
+                width: 32,
+                height: 32,
+                borderRadius: '50%',
+                backgroundColor: '#1ed760',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 900,
+                color: '#000',
+                flexShrink: 0
+              }}>
+                ⚡
+              </div>
+              <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.5 }}>OposAlert</span>
             </div>
-            <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.5 }}>OposAlert</span>
+
+            {/* Navegación */}
+            <nav style={{ display: 'flex', flexDirection: 'row', gap: 8 }}>
+              <button
+                onClick={() => setFilter('all')}
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  padding: '10px 12px',
+                  borderRadius: 6,
+                  border: 'none',
+                  backgroundColor: filter === 'all' ? '#282828' : 'transparent',
+                  color: filter === 'all' ? '#ffffff' : '#b3b3b3',
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                <span>🏠</span> Inicio
+              </button>
+
+              <button
+                onClick={() => setFilter('alerts')}
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  padding: '10px 12px',
+                  borderRadius: 6,
+                  border: 'none',
+                  backgroundColor: filter === 'alerts' ? '#282828' : 'transparent',
+                  color: filter === 'alerts' ? '#ffffff' : '#b3b3b3',
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                <span>🔔</span> Novedades
+                {alteredPages.length > 0 && (
+                  <span style={{
+                    backgroundColor: '#e91429',
+                    color: '#fff',
+                    fontSize: 11,
+                    fontWeight: 800,
+                    borderRadius: 12,
+                    padding: '2px 8px'
+                  }}>
+                    {alteredPages.length}
+                  </span>
+                )}
+              </button>
+            </nav>
+
+            {/* Bloque Crear Alerta */}
+            <div className="sidebar-box" style={{
+              marginTop: 20,
+              padding: 16,
+              backgroundColor: '#1f1f1f',
+              borderRadius: 8
+            }}>
+              <div>
+                <div className="sidebar-box-title" style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>
+                  Vigila una web
+                </div>
+                <div className="sidebar-box-desc" style={{ fontSize: 12, color: '#b3b3b3', marginBottom: 16 }}>
+                  Recibe avisos cuando se añada texto a una convocatoria.
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowModal(true)}
+                style={{
+                  backgroundColor: '#ffffff',
+                  color: '#000000',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: 20,
+                  fontWeight: 700,
+                  fontSize: 13,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                + Crear
+              </button>
+            </div>
           </div>
 
-          {/* Navegación */}
-          <nav style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <button
-              onClick={() => setFilter('all')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 14,
-                padding: '10px 12px',
-                borderRadius: 6,
-                border: 'none',
-                backgroundColor: filter === 'all' ? '#282828' : 'transparent',
-                color: filter === 'all' ? '#ffffff' : '#b3b3b3',
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: 'pointer',
-                textAlign: 'left'
-              }}
-            >
-              <span>🏠</span> Inicio
-            </button>
-            <button
-              onClick={() => setFilter('alerts')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '10px 12px',
-                borderRadius: 6,
-                border: 'none',
-                backgroundColor: filter === 'alerts' ? '#282828' : 'transparent',
-                color: filter === 'alerts' ? '#ffffff' : '#b3b3b3',
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: 'pointer'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <span>🔔</span> Novedades
-              </div>
-              {alteredPages.length > 0 && (
+          {/* Info Dispositivo */}
+          <div className="sidebar-info" style={{ fontSize: 11, color: '#727272', padding: '0 8px', marginTop: 16 }}>
+            <div>Dispositivo:</div>
+            <div style={{ fontFamily: 'monospace', color: '#a7a7a7', marginTop: 2, wordBreak: 'break-all' }}>{deviceId}</div>
+          </div>
+        </aside>
+
+        {/* ÁREA DE CONTENIDO PRINCIPAL */}
+        <main className="main-content">
+          
+          {/* Cabecera Superior */}
+          <div className="header-bar">
+            <div className="header-status" style={{ fontSize: 13, color: '#b3b3b3', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                backgroundColor: checking ? '#ffa42b' : '#1ed760',
+                display: 'inline-block',
+                flexShrink: 0
+              }} />
+              {checking ? 'Rastreando páginas...' : 'Monitorización activa'}
+            </div>
+
+            <div className="header-actions" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {notification && (
                 <span style={{
-                  backgroundColor: '#e91429',
-                  color: '#fff',
                   fontSize: 11,
-                  fontWeight: 800,
-                  borderRadius: 12,
-                  padding: '2px 8px'
+                  padding: '6px 12px',
+                  borderRadius: 16,
+                  backgroundColor: notification.type === 'success' ? 'rgba(30,215,96,0.15)' : 'rgba(255,255,255,0.1)',
+                  color: notification.type === 'success' ? '#1ed760' : '#ffffff',
+                  border: notification.type === 'success' ? '1px solid #1ed760' : '1px solid #444',
+                  whiteSpace: 'nowrap'
                 }}>
-                  {alteredPages.length}
+                  {notification.text}
                 </span>
               )}
-            </button>
-          </nav>
 
-          {/* Bloque Crear Alerta */}
-          <div style={{
-            marginTop: 24,
-            padding: 16,
-            backgroundColor: '#1f1f1f',
-            borderRadius: 8
-          }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Vigila una nueva web</div>
-            <div style={{ fontSize: 12, color: '#b3b3b3', marginBottom: 16 }}>
-              Introduce el enlace de una convocatoria o boletín para recibir avisos.
+              <button
+                onClick={handleManualCheck}
+                disabled={checking}
+                style={{
+                  backgroundColor: '#ffffff',
+                  color: '#000000',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: 20,
+                  fontWeight: 700,
+                  fontSize: 12,
+                  cursor: checking ? 'not-allowed' : 'pointer',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {checking ? 'Comprobando...' : 'Comprobar ahora'}
+              </button>
             </div>
-            <button
-              onClick={() => setShowModal(true)}
-              style={{
-                backgroundColor: '#ffffff',
-                color: '#000000',
-                border: 'none',
-                padding: '8px 16px',
-                borderRadius: 20,
-                fontWeight: 700,
-                fontSize: 13,
-                cursor: 'pointer'
-              }}
-            >
-              Crear alerta
-            </button>
-          </div>
-        </div>
-
-        {/* Info Dispositivo */}
-        <div style={{ fontSize: 11, color: '#727272', padding: '0 8px' }}>
-          <div>Dispositivo:</div>
-          <div style={{ fontFamily: 'monospace', color: '#a7a7a7', marginTop: 2 }}>{deviceId}</div>
-        </div>
-      </aside>
-
-      {/* ÁREA DE CONTENIDO PRINCIPAL */}
-      <main style={{
-        flex: 1,
-        backgroundColor: '#121212',
-        borderRadius: 8,
-        margin: '8px 8px 8px 8px',
-        overflowY: 'auto',
-        display: 'flex',
-        flexDirection: 'column'
-      }}>
-        
-        {/* Cabecera Superior */}
-        <div style={{
-          position: 'sticky',
-          top: 0,
-          backgroundColor: 'rgba(18, 18, 18, 0.85)',
-          backdropFilter: 'blur(10px)',
-          padding: '16px 32px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          zIndex: 10,
-          borderBottom: '1px solid rgba(255, 255, 255, 0.05)'
-        }}>
-          <div style={{ fontSize: 14, color: '#b3b3b3', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{
-              width: 8,
-              height: 8,
-              borderRadius: '50%',
-              backgroundColor: checking ? '#ffa42b' : '#1ed760',
-              display: 'inline-block'
-            }} />
-            {checking ? 'Rastreando cambios en segundo plano...' : 'Revisión periódica activa'}
           </div>
 
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-            {notification && (
-              <span style={{
-                fontSize: 12,
-                padding: '6px 14px',
-                borderRadius: 20,
-                backgroundColor: notification.type === 'success' ? 'rgba(30,215,96,0.15)' : 'rgba(255,255,255,0.1)',
-                color: notification.type === 'success' ? '#1ed760' : '#ffffff',
-                border: notification.type === 'success' ? '1px solid #1ed760' : '1px solid #444'
-              }}>
-                {notification.text}
+          {/* Cuerpo */}
+          <div className="content-body">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 16 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0, letterSpacing: -0.5 }}>
+                {filter === 'alerts' ? 'Modificaciones' : 'Seguimiento'}
+              </h2>
+              <span style={{ fontSize: 12, color: '#b3b3b3', fontWeight: 600 }}>
+                {displayedPages.length} {displayedPages.length === 1 ? 'página' : 'páginas'}
               </span>
-            )}
-            <button
-              onClick={handleManualCheck}
-              disabled={checking}
-              style={{
-                backgroundColor: '#ffffff',
-                color: '#000000',
-                border: 'none',
-                padding: '10px 20px',
-                borderRadius: 20,
-                fontWeight: 700,
-                fontSize: 13,
-                cursor: checking ? 'not-allowed' : 'pointer'
-              }}
-            >
-              {checking ? 'Comprobando...' : 'Comprobar ahora'}
-            </button>
-          </div>
-        </div>
-
-        {/* Cuadrícula de Alertas */}
-        <div style={{ padding: '24px 32px 64px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 20 }}>
-            <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0, letterSpacing: -0.5 }}>
-              {filter === 'alerts' ? 'Modificaciones detectadas' : 'Páginas en seguimiento'}
-            </h2>
-            <span style={{ fontSize: 13, color: '#b3b3b3', fontWeight: 600 }}>
-              {displayedPages.length} {displayedPages.length === 1 ? 'página' : 'páginas'}
-            </span>
-          </div>
-
-          {displayedPages.length === 0 ? (
-            <div style={{
-              backgroundColor: '#181818',
-              borderRadius: 8,
-              padding: '64px 32px',
-              textAlign: 'center',
-              color: '#b3b3b3'
-            }}>
-              <div style={{ fontSize: 48, marginBottom: 16 }}>📋</div>
-              <h3 style={{ color: '#fff', fontSize: 18, margin: '0 0 8px' }}>
-                {filter === 'alerts' ? 'No hay novedades recientes' : 'Tu lista de alertas está vacía'}
-              </h3>
-              <p style={{ fontSize: 14, maxWidth: 400, margin: '0 auto 20px' }}>
-                {filter === 'alerts'
-                  ? 'Todas las páginas vigiladas permanecen sin modificaciones.'
-                  : 'Pulsa en "+ Crear alerta" en el panel lateral para empezar.'}
-              </p>
             </div>
-          ) : (
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-              gap: 24
-            }}>
-              {displayedPages.map(page => {
-                const screenshotUrl = `https://s.wordpress.com/mshots/v1/${encodeURIComponent(page.url)}?w=600`;
 
-                return (
-                  <div
-                    key={page.id}
-                    style={{
-                      backgroundColor: '#181818',
-                      borderRadius: 8,
-                      padding: 16,
-                      position: 'relative',
-                      transition: 'background-color 0.2s ease, transform 0.2s ease',
-                      border: page.has_changed ? '2px solid #e91429' : '1px solid rgba(255,255,255,0.05)',
-                      display: 'flex',
-                      flexDirection: 'column'
-                    }}
-                  >
-                    {/* Captura de Pantalla */}
-                    <div style={{
-                      position: 'relative',
-                      width: '100%',
-                      paddingTop: '100%',
-                      borderRadius: 6,
-                      overflow: 'hidden',
-                      backgroundColor: '#282828',
-                      marginBottom: 16,
-                      boxShadow: '0 8px 24px rgba(0,0,0,0.5)'
-                    }}>
-                      <img
-                        src={screenshotUrl}
-                        alt={page.name}
-                        style={{
-                          position: 'absolute',
-                          top: 0,
-                          left: 0,
-                          width: '100%',
-                          height: '100%',
-                          objectFit: 'cover',
-                          objectPosition: 'top center'
-                        }}
-                        onError={(e) => { e.target.style.display = 'none'; }}
-                      />
+            {displayedPages.length === 0 ? (
+              <div style={{
+                backgroundColor: '#181818',
+                borderRadius: 8,
+                padding: '40px 20px',
+                textAlign: 'center',
+                color: '#b3b3b3'
+              }}>
+                <div style={{ fontSize: 36, marginBottom: 12 }}>📋</div>
+                <h3 style={{ color: '#fff', fontSize: 16, margin: '0 0 8px' }}>
+                  {filter === 'alerts' ? 'Sin novedades' : 'Lista vacía'}
+                </h3>
+                <p style={{ fontSize: 13, maxWidth: 360, margin: '0 auto' }}>
+                  {filter === 'alerts'
+                    ? 'Todas las páginas permanecen sin cambios.'
+                    : 'Añade una URL para comenzar a monitorizar.'}
+                </p>
+              </div>
+            ) : (
+              <div className="grid-cards">
+                {displayedPages.map(page => {
+                  const screenshotUrl = `https://s.wordpress.com/mshots/v1/${encodeURIComponent(page.url)}?w=600`;
 
-                      {page.has_changed && (
-                        <div style={{
-                          position: 'absolute',
-                          top: 8,
-                          left: 8,
-                          backgroundColor: '#e91429',
-                          color: '#fff',
-                          fontSize: 10,
-                          fontWeight: 800,
-                          textTransform: 'uppercase',
-                          padding: '3px 8px',
-                          borderRadius: 4
-                        }}>
-                          ¡Cambio!
-                        </div>
-                      )}
-
-                      <a
-                        href={page.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        title="Ir a la web"
-                        style={{
-                          position: 'absolute',
-                          bottom: 8,
-                          right: 8,
-                          width: 44,
-                          height: 44,
-                          borderRadius: '50%',
-                          backgroundColor: page.has_changed ? '#e91429' : '#1ed760',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          color: '#000',
-                          textDecoration: 'none',
-                          fontSize: 18,
-                          boxShadow: '0 8px 16px rgba(0,0,0,0.4)'
-                        }}
-                      >
-                        ↗
-                      </a>
-                    </div>
-
-                    {/* Información */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <h3 style={{
-                        fontSize: 16,
-                        fontWeight: 700,
-                        margin: '0 0 6px',
-                        color: '#ffffff',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis'
-                      }}>
-                        {page.name}
-                      </h3>
-                      
+                  return (
+                    <div
+                      key={page.id}
+                      style={{
+                        backgroundColor: '#181818',
+                        borderRadius: 8,
+                        padding: 12,
+                        position: 'relative',
+                        border: page.has_changed ? '2px solid #e91429' : '1px solid rgba(255,255,255,0.05)',
+                        display: 'flex',
+                        flexDirection: 'column'
+                      }}
+                    >
+                      {/* Captura de pantalla */}
                       <div style={{
-                        fontSize: 12,
-                        color: '#b3b3b3',
-                        whiteSpace: 'nowrap',
+                        position: 'relative',
+                        width: '100%',
+                        paddingTop: '100%',
+                        borderRadius: 6,
                         overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        marginBottom: 4
+                        backgroundColor: '#282828',
+                        marginBottom: 12,
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
                       }}>
-                        {page.url.replace(/^https?:\/\//, '')}
-                      </div>
-
-                      <div style={{ fontSize: 11, color: '#727272' }}>
-                        {page.last_checked || 'Guardada'}
-                      </div>
-                    </div>
-
-                    {/* Acciones */}
-                    <div style={{
-                      display: 'flex',
-                      gap: 8,
-                      marginTop: 14,
-                      paddingTop: 12,
-                      borderTop: '1px solid rgba(255,255,255,0.06)'
-                    }}>
-                      {page.has_changed && (
-                        <button
-                          onClick={() => handleDismiss(page.id)}
+                        <img
+                          src={screenshotUrl}
+                          alt={page.name}
                           style={{
-                            flex: 1,
-                            padding: '6px 0',
-                            backgroundColor: '#282828',
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            objectPosition: 'top center'
+                          }}
+                          onError={(e) => { e.target.style.display = 'none'; }}
+                        />
+
+                        {page.has_changed && (
+                          <div style={{
+                            position: 'absolute',
+                            top: 6,
+                            left: 6,
+                            backgroundColor: '#e91429',
                             color: '#fff',
+                            fontSize: 9,
+                            fontWeight: 800,
+                            textTransform: 'uppercase',
+                            padding: '2px 6px',
+                            borderRadius: 4
+                          }}>
+                            ¡Cambio!
+                          </div>
+                        )}
+
+                        <a
+                          href={page.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="Ir a la web"
+                          style={{
+                            position: 'absolute',
+                            bottom: 6,
+                            right: 6,
+                            width: 36,
+                            height: 36,
+                            borderRadius: '50%',
+                            backgroundColor: page.has_changed ? '#e91429' : '#1ed760',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: '#000',
+                            textDecoration: 'none',
+                            fontSize: 16,
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.4)'
+                          }}
+                        >
+                          ↗
+                        </a>
+                      </div>
+
+                      {/* Información */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <h3 style={{
+                          fontSize: 14,
+                          fontWeight: 700,
+                          margin: '0 0 4px',
+                          color: '#ffffff',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis'
+                        }}>
+                          {page.name}
+                        </h3>
+                        
+                        <div style={{
+                          fontSize: 11,
+                          color: '#b3b3b3',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          marginBottom: 4
+                        }}>
+                          {page.url.replace(/^https?:\/\//, '')}
+                        </div>
+                      </div>
+
+                      {/* Acciones */}
+                      <div style={{
+                        display: 'flex',
+                        gap: 6,
+                        marginTop: 10,
+                        paddingTop: 8,
+                        borderTop: '1px solid rgba(255,255,255,0.06)'
+                      }}>
+                        {page.has_changed && (
+                          <button
+                            onClick={() => handleDismiss(page.id)}
+                            style={{
+                              flex: 1,
+                              padding: '6px 0',
+                              backgroundColor: '#282828',
+                              color: '#fff',
+                              border: 'none',
+                              borderRadius: 4,
+                              fontSize: 11,
+                              fontWeight: 600,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            Visto
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleDelete(page.id, page.name)}
+                          style={{
+                            padding: '6px 8px',
+                            backgroundColor: 'transparent',
+                            color: '#727272',
                             border: 'none',
                             borderRadius: 4,
-                            fontSize: 12,
-                            fontWeight: 600,
+                            fontSize: 11,
                             cursor: 'pointer'
                           }}
                         >
-                          Visto
+                          Borrar
                         </button>
-                      )}
-                      <button
-                        onClick={() => handleDelete(page.id, page.name)}
-                        style={{
-                          padding: '6px 10px',
-                          backgroundColor: 'transparent',
-                          color: '#727272',
-                          border: 'none',
-                          borderRadius: 4,
-                          fontSize: 12,
-                          cursor: 'pointer'
-                        }}
-                      >
-                        Borrar
-                      </button>
+                      </div>
+
                     </div>
-
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </main>
-
-      {/* MODAL CREAR ALERTA */}
-      {showModal && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.75)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: 16,
-          zIndex: 100
-        }}>
-          <div style={{
-            backgroundColor: '#282828',
-            borderRadius: 12,
-            width: '100%',
-            maxWidth: 440,
-            padding: 32,
-            boxShadow: '0 20px 40px rgba(0,0,0,0.6)'
-          }}>
-            <h3 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 700, color: '#fff' }}>
-              Nueva alerta web
-            </h3>
-            <p style={{ margin: '0 0 24px', fontSize: 13, color: '#b3b3b3' }}>
-              Generará una carátula automática y avisará por correo ante contenido nuevo.
-            </p>
-
-            <form onSubmit={handleAddSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6, color: '#fff' }}>
-                  Nombre de la página
-                </label>
-                <input
-                  required
-                  type="text"
-                  value={form.name}
-                  onChange={e => setForm({ ...form, name: e.target.value })}
-                  placeholder="Ej. BOE Oposiciones"
-                  style={{
-                    width: '100%',
-                    padding: '12px 14px',
-                    fontSize: 14,
-                    backgroundColor: '#3e3e3e',
-                    border: '1px solid transparent',
-                    borderRadius: 6,
-                    color: '#fff',
-                    boxSizing: 'border-box',
-                    outline: 'none'
-                  }}
-                />
+                  );
+                })}
               </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6, color: '#fff' }}>
-                  Dirección URL
-                </label>
-                <input
-                  required
-                  type="url"
-                  value={form.url}
-                  onChange={e => setForm({ ...form, url: e.target.value })}
-                  placeholder="https://www.boe.es/..."
-                  style={{
-                    width: '100%',
-                    padding: '12px 14px',
-                    fontSize: 14,
-                    backgroundColor: '#3e3e3e',
-                    border: '1px solid transparent',
-                    borderRadius: 6,
-                    color: '#fff',
-                    boxSizing: 'border-box',
-                    outline: 'none'
-                  }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6, color: '#fff' }}>
-                  Correo electrónico para avisos
-                </label>
-                <input
-                  required
-                  type="email"
-                  value={form.notify_email}
-                  onChange={e => setForm({ ...form, notify_email: e.target.value })}
-                  placeholder="tu@email.com"
-                  style={{
-                    width: '100%',
-                    padding: '12px 14px',
-                    fontSize: 14,
-                    backgroundColor: '#3e3e3e',
-                    border: '1px solid transparent',
-                    borderRadius: 6,
-                    color: '#fff',
-                    boxSizing: 'border-box',
-                    outline: 'none'
-                  }}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 12 }}>
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  style={{
-                    padding: '10px 18px',
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: '#b3b3b3',
-                    backgroundColor: 'transparent',
-                    border: 'none',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  style={{
-                    padding: '10px 24px',
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: '#000000',
-                    backgroundColor: '#1ed760',
-                    border: 'none',
-                    borderRadius: 20,
-                    cursor: 'pointer'
-                  }}
-                >
-                  Guardar
-                </button>
-              </div>
-            </form>
+            )}
           </div>
-        </div>
-      )}
+        </main>
 
-    </div>
+        {/* MODAL RESPONSIVO */}
+        {showModal && (
+          <div style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+            zIndex: 100
+          }}>
+            <div style={{
+              backgroundColor: '#282828',
+              borderRadius: 12,
+              width: '100%',
+              maxWidth: 400,
+              padding: 24,
+              boxShadow: '0 20px 40px rgba(0,0,0,0.6)'
+            }}>
+              <h3 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 700, color: '#fff' }}>
+                Nueva alerta web
+              </h3>
+              <p style={{ margin: '0 0 18px', fontSize: 12, color: '#b3b3b3' }}>
+                Generará una carátula automática y enviará avisos al correo ingresado.
+              </p>
+
+              <form onSubmit={handleAddSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4, color: '#fff' }}>
+                    Nombre de la página
+                  </label>
+                  <input
+                    required
+                    type="text"
+                    value={form.name}
+                    onChange={e => setForm({ ...form, name: e.target.value })}
+                    placeholder="Ej. BOE Oposiciones"
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      fontSize: 14,
+                      backgroundColor: '#3e3e3e',
+                      border: '1px solid transparent',
+                      borderRadius: 6,
+                      color: '#fff',
+                      boxSizing: 'border-box',
+                      outline: 'none'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4, color: '#fff' }}>
+                    Dirección URL
+                  </label>
+                  <input
+                    required
+                    type="url"
+                    value={form.url}
+                    onChange={e => setForm({ ...form, url: e.target.value })}
+                    placeholder="https://www.boe.es/..."
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      fontSize: 14,
+                      backgroundColor: '#3e3e3e',
+                      border: '1px solid transparent',
+                      borderRadius: 6,
+                      color: '#fff',
+                      boxSizing: 'border-box',
+                      outline: 'none'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4, color: '#fff' }}>
+                    Correo electrónico para avisos
+                  </label>
+                  <input
+                    required
+                    type="email"
+                    value={form.notify_email}
+                    onChange={e => setForm({ ...form, notify_email: e.target.value })}
+                    placeholder="tu@email.com"
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      fontSize: 14,
+                      backgroundColor: '#3e3e3e',
+                      border: '1px solid transparent',
+                      borderRadius: 6,
+                      color: '#fff',
+                      boxSizing: 'border-box',
+                      outline: 'none'
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowModal(false)}
+                    style={{
+                      padding: '10px 16px',
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: '#b3b3b3',
+                      backgroundColor: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    style={{
+                      padding: '10px 20px',
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: '#000000',
+                      backgroundColor: '#1ed760',
+                      border: 'none',
+                      borderRadius: 20,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Guardar
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+      </div>
+    </>
   );
 }
