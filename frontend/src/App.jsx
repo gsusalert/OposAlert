@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-// Iconos SVG minimalistas estilo Spotify
+// Iconos SVG
 const BellIcon = () => (
   <svg className="w-6 h-6 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
@@ -71,11 +71,11 @@ export default function App() {
         setFormData({ title: '', url: '', email: '' });
         setShowModal(false);
         fetchAlerts();
-        setMessage('Alerta creada con éxito');
-        setTimeout(() => setMessage(null), 3000);
+        setMessage({ text: 'Alerta creada con éxito', type: 'success' });
+        setTimeout(() => setMessage(null), 4000);
       }
     } catch (err) {
-      setMessage('Error al crear alerta');
+      setMessage({ text: 'Error al crear alerta', type: 'error' });
     }
   };
 
@@ -90,26 +90,34 @@ export default function App() {
 
   const handleTriggerCheck = async () => {
     setChecking(true);
+    setMessage({ text: 'Analizando páginas en busca de contenido nuevo...', type: 'info' });
     try {
-      await fetch(`${API_BASE_URL}/api/check`, { method: 'POST' });
-      setMessage('Comprobando páginas en segundo plano...');
-      setTimeout(() => {
-        fetchAlerts();
-        setChecking(false);
-        setMessage(null);
-      }, 4000);
+      const res = await fetch(`${API_BASE_URL}/api/check`, { method: 'POST' });
+      const data = await res.json();
+      
+      await fetchAlerts();
+      setChecking(false);
+
+      if (data.newAdditionsCount && data.newAdditionsCount > 0) {
+        setMessage({ text: `¡Atención! Se han añadido datos nuevos en ${data.newAdditionsCount} página(s).`, type: 'success' });
+      } else {
+        setMessage({ text: 'Comprobación finalizada: No se ha añadido contenido nuevo en ninguna página.', type: 'neutral' });
+      }
+
+      setTimeout(() => setMessage(null), 5000);
     } catch (err) {
       setChecking(false);
+      setMessage({ text: 'Ocurrió un error al intentar verificar las páginas.', type: 'error' });
+      setTimeout(() => setMessage(null), 4000);
     }
   };
 
   return (
     <div className="flex flex-col md:flex-row h-screen bg-black text-white font-sans overflow-hidden">
 
-      {/* BARRA LATERAL (SIDEBAR ESTILO SPOTIFY) */}
+      {/* BARRA LATERAL (SIDEBAR) */}
       <aside className="w-full md:w-64 bg-zinc-950 p-6 flex flex-col justify-between border-b md:border-b-0 md:border-r border-zinc-900 flex-shrink-0">
         <div>
-          {/* LOGO */}
           <div className="flex items-center gap-3 mb-8">
             <div className="p-2 bg-emerald-500/10 rounded-full">
               <BellIcon />
@@ -117,7 +125,6 @@ export default function App() {
             <span className="text-xl font-bold tracking-tight text-white">GsusAlert</span>
           </div>
 
-          {/* MENÚ DE NAVEGACIÓN */}
           <nav className="space-y-4 text-sm font-semibold text-zinc-400">
             <div className="text-white flex items-center gap-3 cursor-pointer p-2 rounded-lg bg-zinc-900">
               <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
@@ -126,7 +133,6 @@ export default function App() {
           </nav>
         </div>
 
-        {/* BOTÓN DE AÑADIR */}
         <button
           onClick={() => setShowModal(true)}
           className="mt-6 flex items-center justify-center gap-2 w-full bg-emerald-500 hover:bg-emerald-400 text-black font-bold py-3 rounded-full transition-all duration-200 transform hover:scale-105 shadow-lg shadow-emerald-500/20"
@@ -136,24 +142,29 @@ export default function App() {
         </button>
       </aside>
 
-      {/* ÁREA PRINCIPAL (CONTENIDO) */}
+      {/* ÁREA PRINCIPAL */}
       <main className="flex-1 bg-zinc-900/50 p-6 md:p-8 overflow-y-auto pb-28">
         
-        {/* ENCABEZADO */}
-        <div className="flex items-center justify-between mb-8">
+        {/* ENCABEZADO Y NOTIFICACIÓN */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
             <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">Páginas Monitorizadas</h1>
-            <p className="text-xs md:text-sm text-zinc-400 mt-1">Suscripciones activas y vista previa de contenido</p>
+            <p className="text-xs md:text-sm text-zinc-400 mt-1">Detecta únicamente la adición de nueva información</p>
           </div>
 
           {message && (
-            <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs px-4 py-2 rounded-full animate-fade-in">
-              {message}
+            <div className={`text-xs px-4 py-2.5 rounded-full font-medium transition-all shadow-md ${
+              message.type === 'success' ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300' :
+              message.type === 'error' ? 'bg-red-500/20 border border-red-500/40 text-red-300' :
+              message.type === 'info' ? 'bg-blue-500/20 border border-blue-500/40 text-blue-300' :
+              'bg-zinc-800 border border-zinc-700 text-zinc-300'
+            }`}>
+              {message.text}
             </div>
           )}
         </div>
 
-        {/* VISTA EN REJILLA DE TARJETAS (ESTILO PLAYLISTS) */}
+        {/* REJILLA DE TARJETAS */}
         {loading ? (
           <div className="text-zinc-500 text-sm italic py-12 text-center">Cargando tus monitorizaciones...</div>
         ) : alerts.length === 0 ? (
@@ -173,15 +184,14 @@ export default function App() {
                 key={alert.id}
                 className="group relative bg-zinc-950/80 hover:bg-zinc-800/60 border border-zinc-800/80 hover:border-zinc-700 p-5 rounded-2xl transition-all duration-300 flex flex-col justify-between shadow-lg"
               >
-                {/* CABECERA TARJETA */}
                 <div>
-                  {/* VISTA PREVIA DEL CONTENIDO DE LA PÁGINA */}
+                  {/* VISTA PREVIA DEL TEXTO */}
                   <div className="w-full h-28 bg-gradient-to-br from-zinc-900 to-zinc-950 border border-zinc-800 rounded-xl p-3 mb-4 overflow-hidden relative">
                     <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest block mb-1">
-                      Vista previa del sitio
+                      Inicio del contenido
                     </span>
                     <p className="text-xs text-zinc-400 line-clamp-4 leading-relaxed font-sans">
-                      {alert.last_text ? alert.last_text : "Sin capturas registradas aún. Se analizará en el próximo escaneo."}
+                      {alert.last_text ? alert.last_text : "Sin capturas iniciales. Se registrará en la primera comprobación."}
                     </p>
                     <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-zinc-950 to-transparent"></div>
                   </div>
@@ -196,11 +206,10 @@ export default function App() {
                       alert.status === 'error' ? 'bg-red-500/20 text-red-400 border border-red-500/40' :
                       'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
                     }`}>
-                      {alert.status === 'changed' ? '¡Novedad!' : alert.status === 'error' ? 'Error' : 'Activo'}
+                      {alert.status === 'changed' ? '¡Novedad añadida!' : alert.status === 'error' ? 'Error al leer' : 'Sin cambios'}
                     </span>
                   </div>
 
-                  {/* ENLACE DE LA URL */}
                   <a
                     href={alert.url}
                     target="_blank"
@@ -212,9 +221,8 @@ export default function App() {
                   </a>
                 </div>
 
-                {/* BOTÓN ELIMINAR */}
                 <div className="flex items-center justify-between pt-3 border-t border-zinc-900">
-                  <span className="text-[11px] text-zinc-500">
+                  <span className="text-[11px] text-zinc-500 truncate max-w-[140px]">
                     {alert.email}
                   </span>
                   <button
@@ -231,13 +239,13 @@ export default function App() {
         )}
       </main>
 
-      {/* BARRA INFERIOR DE ACCIÓN Y CONTROL (REPRODUCTOR SPOTIFY) */}
+      {/* BARRA INFERIOR DE ACCIÓN */}
       <footer className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800/80 px-6 py-4 flex items-center justify-between z-40">
         <div className="flex items-center gap-4">
           <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></div>
           <div>
-            <p className="text-xs font-bold text-white">Sistema Monitor de GsusAlert</p>
-            <p className="text-[11px] text-zinc-400">{alerts.length} páginas agregadas</p>
+            <p className="text-xs font-bold text-white">GsusAlert Engine</p>
+            <p className="text-[11px] text-zinc-400">{alerts.length} páginas configuradas</p>
           </div>
         </div>
 
@@ -251,7 +259,7 @@ export default function App() {
         </button>
       </footer>
 
-      {/* MODAL PARA CREAR NUEVA ALERTA */}
+      {/* MODAL */}
       {showModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-zinc-950 border border-zinc-800 p-6 md:p-8 rounded-3xl max-w-md w-full shadow-2xl">
@@ -261,7 +269,7 @@ export default function App() {
                 <label className="block text-xs font-medium text-zinc-400 mb-1">Nombre o Título</label>
                 <input
                   type="text"
-                  placeholder="Ej: Oposición Junta de Andalucía"
+                  placeholder="Ej: Convocatoria Auxiliar Administrativo"
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                   required
@@ -282,7 +290,7 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1">Correo electrónico de notificación</label>
+                <label className="block text-xs font-medium text-zinc-400 mb-1">Correo para avisos</label>
                 <input
                   type="email"
                   placeholder="tuemail@ejemplo.com"
