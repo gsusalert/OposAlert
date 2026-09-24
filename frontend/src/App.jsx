@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 const API_URL = "https://gsusalert.onrender.com";
 
+// Funciones de gestión de identificador único de dispositivo por cookies/localStorage
 function setCookie(name, value, days = 365) {
   const date = new Date();
   date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
@@ -42,6 +43,7 @@ export default function App() {
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ name: '', url: '', notify_email: '' });
   const [filter, setFilter] = useState('all'); // 'all' o 'alerts'
+  const [notification, setNotification] = useState(null);
 
   const loadPages = async () => {
     if (!deviceId) return;
@@ -52,7 +54,7 @@ export default function App() {
         setPages(data);
       }
     } catch (e) {
-      console.error(e);
+      console.error("Error al cargar las páginas:", e);
     }
   };
 
@@ -64,12 +66,27 @@ export default function App() {
 
   const handleManualCheck = async () => {
     setChecking(true);
+    setNotification({ text: "Analizando páginas en busca de texto nuevo...", type: "info" });
     try {
       const res = await fetch(`${API_URL}/api/check?device_id=${encodeURIComponent(deviceId)}`, { method: 'POST' });
-      await res.json();
+      const data = await res.json();
       await loadPages();
+
+      if (data.newAdditionsCount && data.newAdditionsCount > 0) {
+        setNotification({ 
+          text: `¡Atención! Se ha añadido información nueva en ${data.newAdditionsCount} página(s).`, 
+          type: "success" 
+        });
+      } else {
+        setNotification({ 
+          text: "Comprobación finalizada: No se ha detectado contenido nuevo.", 
+          type: "neutral" 
+        });
+      }
+      setTimeout(() => setNotification(null), 5000);
     } catch (e) {
-      alert("Error al comprobar: " + e.message);
+      setNotification({ text: "Error de conexión al comprobar.", type: "error" });
+      setTimeout(() => setNotification(null), 4000);
     } finally {
       setChecking(false);
     }
@@ -89,27 +106,37 @@ export default function App() {
         })
       });
       const data = await res.json();
-      if (data.status === 'success') {
+      if (data.status === 'success' || res.ok) {
         setShowModal(false);
         setForm({ name: '', url: '', notify_email: form.notify_email });
-        loadPages();
+        await loadPages();
+        setNotification({ text: "Alerta creada correctamente.", type: "success" });
+        setTimeout(() => setNotification(null), 4000);
       } else {
-        alert("Error: " + (data.message || data.detail));
+        alert("Error: " + (data.message || data.detail || "No se pudo guardar la alerta"));
       }
     } catch (e) {
-      alert("Error de conexión");
+      alert("Error de conexión al guardar la alerta.");
     }
   };
 
   const handleDismiss = async (id) => {
-    await fetch(`${API_URL}/api/pages/${id}/dismiss`, { method: 'POST' });
-    loadPages();
+    try {
+      await fetch(`${API_URL}/api/pages/${id}/dismiss`, { method: 'POST' });
+      loadPages();
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const handleDelete = async (id, name) => {
     if (!window.confirm(`¿Dejar de monitorizar "${name}"?`)) return;
-    await fetch(`${API_URL}/api/pages/${id}`, { method: 'DELETE' });
-    loadPages();
+    try {
+      await fetch(`${API_URL}/api/pages/${id}`, { method: 'DELETE' });
+      loadPages();
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const alteredPages = pages.filter(p => p.has_changed);
@@ -137,7 +164,7 @@ export default function App() {
         flexShrink: 0
       }}>
         <div>
-          {/* Logo / Nombre */}
+          {/* Logo */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 8px', marginBottom: 28 }}>
             <div style={{
               width: 32,
@@ -155,7 +182,7 @@ export default function App() {
             <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.5 }}>OposAlert</span>
           </div>
 
-          {/* Menú principal */}
+          {/* Navegación */}
           <nav style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <button
               onClick={() => setFilter('all')}
@@ -210,7 +237,7 @@ export default function App() {
             </button>
           </nav>
 
-          {/* Sección biblioteca / añadir */}
+          {/* Bloque Crear Alerta */}
           <div style={{
             marginTop: 24,
             padding: 16,
@@ -239,7 +266,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Info sesión al pie del sidebar */}
+        {/* Info Dispositivo */}
         <div style={{ fontSize: 11, color: '#727272', padding: '0 8px' }}>
           <div>Dispositivo:</div>
           <div style={{ fontFamily: 'monospace', color: '#a7a7a7', marginTop: 2 }}>{deviceId}</div>
@@ -257,7 +284,7 @@ export default function App() {
         flexDirection: 'column'
       }}>
         
-        {/* Cabecera superior translúcida */}
+        {/* Cabecera Superior */}
         <div style={{
           position: 'sticky',
           top: 0,
@@ -278,10 +305,22 @@ export default function App() {
               backgroundColor: checking ? '#ffa42b' : '#1ed760',
               display: 'inline-block'
             }} />
-            {checking ? 'Rastreando cambios en segundo plano...' : 'Revisión periódica activa cada 15 min'}
+            {checking ? 'Rastreando cambios en segundo plano...' : 'Revisión periódica activa'}
           </div>
 
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            {notification && (
+              <span style={{
+                fontSize: 12,
+                padding: '6px 14px',
+                borderRadius: 20,
+                backgroundColor: notification.type === 'success' ? 'rgba(30,215,96,0.15)' : 'rgba(255,255,255,0.1)',
+                color: notification.type === 'success' ? '#1ed760' : '#ffffff',
+                border: notification.type === 'success' ? '1px solid #1ed760' : '1px solid #444'
+              }}>
+                {notification.text}
+              </span>
+            )}
             <button
               onClick={handleManualCheck}
               disabled={checking}
@@ -301,9 +340,8 @@ export default function App() {
           </div>
         </div>
 
-        {/* CUERPO: CUADRÍCULA DE CUADRADITOS / CARÁTULAS */}
+        {/* Cuadrícula de Alertas */}
         <div style={{ padding: '24px 32px 64px' }}>
-          
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 20 }}>
             <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0, letterSpacing: -0.5 }}>
               {filter === 'alerts' ? 'Modificaciones detectadas' : 'Páginas en seguimiento'}
@@ -327,8 +365,8 @@ export default function App() {
               </h3>
               <p style={{ fontSize: 14, maxWidth: 400, margin: '0 auto 20px' }}>
                 {filter === 'alerts'
-                  ? 'Todas las páginas vigiladas permanecen sin modificaciones desde la última lectura.'
-                  : 'Pulsa en "+ Crear alerta" en el panel lateral para empezar a monitorizar páginas.'}
+                  ? 'Todas las páginas vigiladas permanecen sin modificaciones.'
+                  : 'Pulsa en "+ Crear alerta" en el panel lateral para empezar.'}
               </p>
             </div>
           ) : (
@@ -338,7 +376,6 @@ export default function App() {
               gap: 24
             }}>
               {displayedPages.map(page => {
-                // Captura en tiempo real del frontal de la web
                 const screenshotUrl = `https://s.wordpress.com/mshots/v1/${encodeURIComponent(page.url)}?w=600`;
 
                 return (
@@ -355,11 +392,11 @@ export default function App() {
                       flexDirection: 'column'
                     }}
                   >
-                    {/* FOTO CUADRADA DEL INICIO DE LA WEB (ESTILO CARÁTULA) */}
+                    {/* Captura de Pantalla */}
                     <div style={{
                       position: 'relative',
                       width: '100%',
-                      paddingTop: '100%', // Proporción 1:1 cuadrada
+                      paddingTop: '100%',
                       borderRadius: 6,
                       overflow: 'hidden',
                       backgroundColor: '#282828',
@@ -378,13 +415,9 @@ export default function App() {
                           objectFit: 'cover',
                           objectPosition: 'top center'
                         }}
-                        onError={(e) => {
-                          // Si falla la captura externa, muestra una carátula con fondo e inicial
-                          e.target.style.display = 'none';
-                        }}
+                        onError={(e) => { e.target.style.display = 'none'; }}
                       />
 
-                      {/* Etiqueta si hay cambio */}
                       {page.has_changed && (
                         <div style={{
                           position: 'absolute',
@@ -396,14 +429,12 @@ export default function App() {
                           fontWeight: 800,
                           textTransform: 'uppercase',
                           padding: '3px 8px',
-                          borderRadius: 4,
-                          letterSpacing: 0.5
+                          borderRadius: 4
                         }}>
                           ¡Cambio!
                         </div>
                       )}
 
-                      {/* Botón flotante para visitar la web directo */}
                       <a
                         href={page.url}
                         target="_blank"
@@ -430,7 +461,7 @@ export default function App() {
                       </a>
                     </div>
 
-                    {/* TÍTULO Y DETALLES */}
+                    {/* Información */}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <h3 style={{
                         fontSize: 16,
@@ -456,11 +487,11 @@ export default function App() {
                       </div>
 
                       <div style={{ fontSize: 11, color: '#727272' }}>
-                        {page.last_checked}
+                        {page.last_checked || 'Guardada'}
                       </div>
                     </div>
 
-                    {/* ACCIONES AL PIE DEL CUADRADO */}
+                    {/* Acciones */}
                     <div style={{
                       display: 'flex',
                       gap: 8,
@@ -510,7 +541,7 @@ export default function App() {
         </div>
       </main>
 
-      {/* MODAL PARA AÑADIR NUEVA PÁGINA (TEMA OSCURO SPOTIFY) */}
+      {/* MODAL CREAR ALERTA */}
       {showModal && (
         <div style={{
           position: 'fixed',
@@ -535,7 +566,7 @@ export default function App() {
               Nueva alerta web
             </h3>
             <p style={{ margin: '0 0 24px', fontSize: 13, color: '#b3b3b3' }}>
-              Generará una carátula automática con la foto de la página y te avisará por correo ante cualquier modificación.
+              Generará una carátula automática y avisará por correo ante contenido nuevo.
             </p>
 
             <form onSubmit={handleAddSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

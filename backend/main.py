@@ -1,49 +1,16 @@
 import os
+import re
+import time
+from typing import List, Optional
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import requests
 from bs4 import BeautifulSoup
-from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, HttpUrl
-from typing import List, Optional
-from datetime import datetime
-from sqlmodel import Field, Session, SQLModel, create_engine, select
 
-# ------------------------------------------------------------------
-# CONFIGURACIÓN DE BASE DE DATOS
-# ------------------------------------------------------------------
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./oposalert.db")
+app = FastAPI(title="OposAlert Engine API")
 
-# Compatibilidad para Render / Heroku (remplaza postgres:// por postgresql://)
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
-)
-
-# ------------------------------------------------------------------
-# MODELO DE DATOS (SQLModel)
-# ------------------------------------------------------------------
-class Alert(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    title: str
-    url: str
-    email: str
-    last_text: Optional[str] = None  # Almacena el texto visible procesado
-    last_checked: Optional[datetime] = None
-    status: str = "active"  # 'active', 'changed', 'error'
-
-class AlertCreate(BaseModel):
-    title: str
-    url: HttpUrl
-    email: str
-
-# ------------------------------------------------------------------
-# CONFIGURACIÓN DE FASTAPI
-# ------------------------------------------------------------------
-app = FastAPI(title="OposAlert API", version="3.0")
-
+# Habilitar CORS total para conectar sin trabas con React
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -52,179 +19,106 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.on_event("startup")
-def on_startup():
-    SQLModel.metadata.create_all(engine)
+# Almacenamiento global de páginas en memoria
+db_pages = []
 
-# ------------------------------------------------------------------
-# LÓGICA DE EXTRACCIÓN Y DETECCIÓN DE AÑADIDOS
-# ------------------------------------------------------------------
-def extract_clean_text(url: str) -> Optional[str]:
-    """
-    Descarga la página web, elimina elementos dinámicos o ruidosos
-    (scripts, menús, footers, contadores) y extrae únicamente el texto visible relevante.
-    """
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
+class PageCreate(BaseModel):
+    device_id: str
+    name: str
+    url: str
+    notify_email: str
+
+def fetch_web_text(url: str) -> Optional[str]:
+    """Descarga y extrae solo el texto limpio de la web."""
     try:
-        response = requests.get(url, headers=headers, timeout=15)
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         
-        soup = BeautifulSoup(response.text, "html.parser")
+        soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 1. Eliminar etiquetas de estructura/dinámicas que producen falsas alarmas
-        unwanted_tags = [
-            "script", "style", "nav", "footer", "header", "aside", 
-            "form", "input", "noscript", "svg", "iframe"
-        ]
-        for tag in soup(unwanted_tags):
-            tag.decompose()
+        # Eliminar etiquetas ruidosas
+        for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'iframe', 'noscript']):
+            tag.extract()
             
-        # 2. Localizar el contenedor principal de contenido
-        main_content = (
-            soup.find("main") or 
-            soup.find("article") or 
-            soup.find(id=lambda x: x and "content" in str(x).lower()) or
-            soup.find(class_=lambda x: x and "content" in str(x).lower())
-        )
-        
-        text_source = main_content if main_content else soup
-        raw_text = text_source.get_text(separator="\n", strip=True)
-        
-        # 3. Filtrar líneas muy cortas o residuales (menos de 4 caracteres)
-        lines = [line.strip() for line in raw_text.splitlines() if len(line.strip()) > 3]
-        return "\n".join(lines)
+        text = soup.get_text(separator=' ')
+        return re.sub(r'\s+', ' ', text).strip()
     except Exception as e:
-        print(f"Error extrayendo texto de {url}: {e}")
+        print(f"Error scraping {url}: {e}")
         return None
 
-
-def detect_additions(old_text: str, new_text: str) -> bool:
-    """
-    Compara el texto anterior con el nuevo y determina si hay líneas o bloques
-    de información completamente nuevos agregados a la página.
-    """
-    if not old_text:
-        return False
-        
-    old_lines = set(old_text.splitlines())
-    new_lines = set(new_text.splitlines())
-    
-    # Obtener únicamente las líneas que no existían previamente
-    added_lines = new_lines - old_lines
-    
-    # Se considera un añadido real si hay al menos una línea nueva relevante
-    return len(added_lines) >= 1
-
-# ------------------------------------------------------------------
-# ENVÍO DE NOTIFICACIONES POR CORREO (BREVO)
-# ------------------------------------------------------------------
-def send_email_notification(to_email: str, title: str, url: str):
-    brevo_api_key = os.getenv("BREVO_API_KEY")
-    if not brevo_api_key:
-        print("Aviso: BREVO_API_KEY no configurada. Omitiendo envío de email.")
-        return
-
-    payload = {
-        "sender": {
-            "name": "OposAlert", 
-            "email": os.getenv("SENDER_EMAIL", "no-reply@oposalert.com")
-        },
-        "to": [{"email": to_email}],
-        "subject": f"🚨 ¡Nuevas publicaciones/añadidos en {title}!",
-        "htmlContent": f"""
-            <h2>¡Atención! Hay novedades en tu convocatoria</h2>
-            <p>Hemos detectado nuevas publicaciones o contenido añadido en <strong>{title}</strong>.</p>
-            <p style="margin: 20px 0;">
-                <a href="{url}" target="_blank" style="padding: 12px 20px; background: #2563eb; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">
-                    Ver contenido oficial en la web
-                </a>
-            </p>
-            <br>
-            <small>Recibes este aviso porque configuraste una alerta en OposAlert.</small>
-        """
-    }
-    headers = {
-        "accept": "application/json",
-        "api-key": brevo_api_key,
-        "content-type": "application/json"
-    }
-    try:
-        requests.post("https://api.brevo.com/v3/smtp/email", json=payload, headers=headers, timeout=10)
-    except Exception as e:
-        print(f"Error enviando correo a través de Brevo: {e}")
-
-# ------------------------------------------------------------------
-# TAREA DE COMPROBACIÓN EN SEGUNDO PLANO
-# ------------------------------------------------------------------
-def run_checks_task():
-    with Session(engine) as session:
-        alerts = session.exec(select(Alert)).all()
-        for alert in alerts:
-            current_text = extract_clean_text(alert.url)
-            
-            if current_text is None:
-                alert.status = "error"
-            elif alert.last_text is None:
-                # Primera lectura al registrar la alerta
-                alert.last_text = current_text
-                alert.status = "active"
-            elif detect_additions(alert.last_text, current_text):
-                # ¡Nuevo contenido o publicación añadida!
-                alert.last_text = current_text
-                alert.status = "changed"
-                send_email_notification(alert.email, alert.title, alert.url)
-            else:
-                alert.status = "active"
-                
-            alert.last_checked = datetime.utcnow()
-            session.add(alert)
-        session.commit()
-
-# ------------------------------------------------------------------
-# ENDPOINTS Y RUTAS DE LA API
-# ------------------------------------------------------------------
 @app.get("/")
-def read_root():
-    return {"status": "ok", "message": "OposAlert API v3.0 operativa"}
+def home():
+    return {"status": "ok", "message": "Backend OposAlert en línea"}
 
-@app.get("/api/alerts", response_model=List[Alert])
-def get_alerts():
-    with Session(engine) as session:
-        return session.exec(select(Alert)).all()
+@app.get("/api/pages")
+def get_pages(device_id: str = Query(...)):
+    """Obtiene únicamente las alertas del dispositivo que hace la consulta."""
+    return [p for p in db_pages if p.get("device_id") == device_id]
 
-@app.post("/api/alerts", response_model=Alert)
-def create_alert(alert_in: AlertCreate):
-    url_str = str(alert_in.url)
-    initial_text = extract_clean_text(url_str)
+@app.post("/api/pages")
+def create_page(item: PageCreate):
+    """Guarda una nueva alerta asociada al device_id."""
+    if not item.name or not item.url or not item.notify_email:
+        raise HTTPException(status_code=400, detail="Faltan campos obligatorios")
     
-    alert = Alert(
-        title=alert_in.title,
-        url=url_str,
-        email=alert_in.email,
-        last_text=initial_text,
-        last_checked=datetime.utcnow() if initial_text else None,
-        status="active" if initial_text else "error"
-    )
+    # Captura del texto base inicial
+    initial_text = fetch_web_text(item.url) or ""
     
-    with Session(engine) as session:
-        session.add(alert)
-        session.commit()
-        session.refresh(alert)
-        return alert
-
-@app.delete("/api/alerts/{alert_id}")
-def delete_alert(alert_id: int):
-    with Session(engine) as session:
-        alert = session.get(Alert, alert_id)
-        if not alert:
-            raise HTTPException(status_code=404, detail="Alerta no encontrada")
-        session.delete(alert)
-        session.commit()
-        return {"ok": True}
+    new_page = {
+        "id": f"page_{int(time.time() * 1000)}",
+        "device_id": item.device_id,
+        "name": item.name,
+        "url": item.url,
+        "notify_email": item.notify_email,
+        "last_text": initial_text,
+        "has_changed": False,
+        "last_checked": "Recién añadida"
+    }
+    
+    db_pages.append(new_page)
+    return {"status": "success", "page": new_page}
 
 @app.post("/api/check")
-def trigger_check(background_tasks: BackgroundTasks):
-    background_tasks.add_task(run_checks_task)
-    return {"message": "Proceso de comprobación iniciado en segundo plano"}
+def check_pages(device_id: str = Query(...)):
+    """Revisa las páginas y solo marca alerta si se ha AÑADIDO texto nuevo (más de 30 caracteres)."""
+    user_pages = [p for p in db_pages if p.get("device_id") == device_id]
+    new_additions_count = 0
+    
+    for page in user_pages:
+        current_text = fetch_web_text(page["url"])
+        if not current_text:
+            continue
+            
+        old_text = page.get("last_text", "")
+        
+        # FILTRO DE ADICIÓN: Comprueba si el texto nuevo supera en 30 caracteres al anterior
+        is_addition = len(old_text) > 0 and len(current_text) > (len(old_text) + 30)
+        
+        if is_addition:
+            page["has_changed"] = True
+            page["last_text"] = current_text
+            new_additions_count += 1
+        else:
+            if len(current_text) > 0:
+                page["last_text"] = current_text
+                
+        page["last_checked"] = "Comprobado ahora"
+        
+    return {"status": "success", "newAdditionsCount": new_additions_count}
+
+@app.post("/api/pages/{page_id}/dismiss")
+def dismiss_page(page_id: str):
+    """Marca como vista la alerta."""
+    for page in db_pages:
+        if page["id"] == page_id:
+            page["has_changed"] = False
+            return {"status": "success"}
+    raise HTTPException(status_code=404, detail="No encontrada")
+
+@app.delete("/api/pages/{page_id}")
+def delete_page(page_id: str):
+    """Elimina la alerta."""
+    global db_pages
+    db_pages = [p for p in db_pages if p["id"] != page_id]
+    return {"status": "success"}
