@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 
 const API_URL = "https://gsusalert.onrender.com";
 
-// Funciones de gestión de identificador único de dispositivo por cookies/localStorage
 function setCookie(name, value, days = 365) {
   const date = new Date();
   date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
@@ -42,7 +41,7 @@ export default function App() {
   const [checking, setChecking] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ name: '', url: '', notify_email: '' });
-  const [filter, setFilter] = useState('all'); // 'all' o 'alerts'
+  const [filter, setFilter] = useState('all');
   const [notification, setNotification] = useState(null);
 
   const loadPages = async () => {
@@ -145,6 +144,21 @@ export default function App() {
   return (
     <>
       <style>{`
+        @keyframes neonGlow {
+          0%, 100% {
+            box-shadow: 0 0 15px rgba(30, 215, 96, 0.6), inset 0 0 10px rgba(30, 215, 96, 0.3);
+            text-shadow: 0 0 8px #1ed760, 0 0 18px rgba(30, 215, 96, 0.8);
+          }
+          50% {
+            box-shadow: 0 0 25px rgba(30, 215, 96, 0.9), inset 0 0 15px rgba(30, 215, 96, 0.5);
+            text-shadow: 0 0 12px #1ed760, 0 0 25px rgba(30, 215, 96, 1);
+          }
+        }
+
+        .neon-bell-box {
+          animation: neonGlow 3s infinite ease-in-out;
+        }
+
         .app-container {
           display: flex;
           min-height: 100vh;
@@ -159,7 +173,7 @@ export default function App() {
           background-color: #121212;
           border-radius: 8px;
           margin: 8px 0 8px 8px;
-          padding: 24px 16px;
+          padding: 20px 16px;
           display: flex;
           flex-direction: column;
           justify-content: space-between;
@@ -267,26 +281,51 @@ export default function App() {
 
       <div className="app-container">
         
-        {/* BARRA LATERAL / MENÚ SUPERIOR EN MÓVIL */}
+        {/* BARRA LATERAL CON EL NUEVO LOGO NEÓN */}
         <aside className="sidebar">
           <div>
-            {/* Logo Marca GsusAlert */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 8px', marginBottom: 20 }}>
-              <div style={{
-                width: 32,
-                height: 32,
-                borderRadius: '50%',
-                backgroundColor: '#1ed760',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontWeight: 900,
-                color: '#000',
-                flexShrink: 0
-              }}>
-                ⚡
+            {/* LOGO CAMPANA + TEXTO GSUSALERT EN NEÓN VERDE */}
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '8px 0 20px',
+              gap: 10
+            }}>
+              {/* Esfera Neón Campana */}
+              <div 
+                className="neon-bell-box"
+                style={{
+                  width: 54,
+                  height: 54,
+                  borderRadius: '50%',
+                  backgroundColor: '#050505',
+                  border: '2px solid #1ed760',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <span style={{ 
+                  fontSize: 28, 
+                  filter: 'drop-shadow(0 0 8px #1ed760)' 
+                }}>
+                  🔔
+                </span>
               </div>
-              <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.5 }}>GsusAlert</span>
+
+              {/* Nombre Neón */}
+              <span style={{
+                fontSize: 17,
+                fontWeight: 900,
+                letterSpacing: 1.8,
+                color: '#ffffff',
+                textTransform: 'uppercase',
+                textShadow: '0 0 8px #1ed760, 0 0 20px rgba(30, 215, 96, 0.8)'
+              }}>
+                GsusAlert
+              </span>
             </div>
 
             {/* Navegación */}
@@ -391,7 +430,6 @@ export default function App() {
         {/* ÁREA DE CONTENIDO PRINCIPAL */}
         <main className="main-content">
           
-          {/* Cabecera Superior */}
           <div className="header-bar">
             <div className="header-status" style={{ fontSize: 13, color: '#b3b3b3', display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{
@@ -440,7 +478,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Cuerpo */}
           <div className="content-body">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 16 }}>
               <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0, letterSpacing: -0.5 }}>
@@ -487,7 +524,6 @@ export default function App() {
                         flexDirection: 'column'
                       }}
                     >
-                      {/* Captura de pantalla */}
                       <div style={{
                         position: 'relative',
                         width: '100%',
@@ -556,7 +592,6 @@ export default function App() {
                         </a>
                       </div>
 
-                      {/* Información */}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <h3 style={{
                           fontSize: 14,
@@ -582,7 +617,6 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Acciones */}
                       <div style={{
                         display: 'flex',
                         gap: 6,
