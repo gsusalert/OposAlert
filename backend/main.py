@@ -5,7 +5,7 @@ import threading
 import time
 import requests
 from bs4 import BeautifulSoup
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -22,10 +22,12 @@ app.add_middleware(
 BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
 SENDER_EMAIL = os.getenv("SENDER_EMAIL", "gsusalert@gmail.com")
 
-DB_FILE = "web_alerts.db"
+# USAR RUTA ABSOLUTA PARA EVITAR QUE SE CREE EN DIRECTORIOS DISTINTOS
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_FILE = os.path.join(BASE_DIR, "web_alerts.db")
 
 def get_db():
-    conn = sqlite3.connect(DB_FILE, timeout=20)
+    conn = sqlite3.connect(DB_FILE, timeout=20, isolation_level=None) # autocommit explícito
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -49,7 +51,6 @@ def init_db():
         c.execute("ALTER TABLE pages ADD COLUMN device_id TEXT NOT NULL DEFAULT ''")
     except Exception:
         pass
-    conn.commit()
     conn.close()
 
 init_db()
@@ -193,11 +194,9 @@ def execute_check_logic(filter_device: str = None):
                     "UPDATE pages SET last_hash = ?, last_checked = ? WHERE id = ?",
                     (current_hash, f"Hoy · {current_time_str}", page_id)
                 )
-            conn.commit()
         except Exception as e:
             print(f"[ERROR CHECK] {name}: {e}")
             c.execute("UPDATE pages SET last_checked = ? WHERE id = ?", ("Error de lectura", page_id))
-            conn.commit()
         finally:
             conn.close()
 
@@ -217,22 +216,23 @@ threading.Thread(target=background_loop_15_minutes, daemon=True).start()
 
 @app.get("/")
 def health():
-    return {"status": "online"}
+    return {"status": "online", "db": DB_FILE}
 
 @app.get("/api/pages")
 def list_pages(device_id: str = Query(...)):
-    """Solo devuelve las páginas vinculadas estrictamente a este device_id."""
-    if not device_id or not device_id.strip():
+    clean_id = device_id.strip()
+    if not clean_id:
         return []
 
     conn = get_db()
     c = conn.cursor()
     c.execute(
-        "SELECT id, name, url, notify_email, last_checked, has_changed, changed_at FROM pages WHERE device_id = ? ORDER BY id DESC",
-        (device_id.strip(),)
+        "SELECT id, device_id, name, url, notify_email, last_checked, has_changed, changed_at FROM pages WHERE device_id = ? ORDER BY id DESC",
+        (clean_id,)
     )
     rows = [dict(r) for r in c.fetchall()]
     conn.close()
+    print(f"[GET /api/pages] device_id={clean_id} -> {len(rows)} encontradas")
     return [
         {
             "id": r["id"],
@@ -248,6 +248,10 @@ def list_pages(device_id: str = Query(...)):
 
 @app.post("/api/pages")
 def add_page(page: PageRequest):
+    clean_id = page.device_id.strip()
+    if not clean_id:
+        raise HTTPException(status_code=400, detail="device_id es obligatorio")
+
     try:
         initial_hash = calculate_hash(page.url)
         status = "Recién añadida"
@@ -255,22 +259,21 @@ def add_page(page: PageRequest):
         initial_hash = hashlib.sha256(f"{page.url}_{time.time()}".encode("utf-8")).hexdigest()
         status = "Pendiente de 1ª lectura"
 
-    try:
-        conn = get_db()
-        c = conn.cursor()
-        c.execute(
-            "INSERT INTO pages (device_id, name, url, notify_email, last_hash, last_checked, has_changed, changed_at) VALUES (?, ?, ?, ?, ?, ?, 0, '')",
-            (page.device_id.strip(), page.name, page.url, page.notify_email, initial_hash, status)
-        )
-        conn.commit()
-        conn.close()
-        return {"status": "success"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    conn = get_db()
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO pages (device_id, name, url, notify_email, last_hash, last_checked, has_changed, changed_at) VALUES (?, ?, ?, ?, ?, ?, 0, '')",
+        (clean_id, page.name.strip(), page.url.strip(), page.notify_email.strip(), initial_hash, status)
+    )
+    new_id = c.lastrowid
+    conn.close()
+    print(f"[INSERT OK] id={new_id} device_id={clean_id} name={page.name}")
+    return {"status": "success", "id": new_id}
 
 @app.post("/api/check")
 def trigger_manual_check(device_id: str = Query(None)):
-    changes = execute_check_logic(filter_device=device_id)
+    clean_id = device_id.strip() if device_id else None
+    changes = execute_check_logic(filter_device=clean_id)
     return {"status": "ok", "changes_detected": changes, "total": len(changes)}
 
 @app.post("/api/pages/{page_id}/dismiss")
@@ -278,17 +281,14 @@ def dismiss_change_alert(page_id: int):
     conn = get_db()
     c = conn.cursor()
     c.execute("UPDATE pages SET has_changed = 0 WHERE id = ?", (page_id,))
-    conn.commit()
     conn.close()
     return {"status": "success"}
 
-# RUTA ESTÁTICA DE RESET (debe colocarse ANTES de /{page_id} para evitar colisión de tipos)
 @app.delete("/api/pages/reset/all")
 def reset_all_pages():
     conn = get_db()
     c = conn.cursor()
     c.execute("DELETE FROM pages")
-    conn.commit()
     conn.close()
     return {"status": "base de datos vaciada con exito"}
 
@@ -297,6 +297,5 @@ def delete_page(page_id: int):
     conn = get_db()
     c = conn.cursor()
     c.execute("DELETE FROM pages WHERE id = ?", (page_id,))
-    conn.commit()
     conn.close()
     return {"status": "success"}
