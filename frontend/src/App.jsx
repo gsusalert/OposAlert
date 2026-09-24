@@ -2,24 +2,54 @@ import React, { useState, useEffect } from 'react';
 
 const API_URL = "https://gsusalert.onrender.com";
 
-// Función para obtener o generar un ID único para este dispositivo/navegador
-function getDeviceId() {
-  let id = localStorage.getItem("opos_device_id");
-  if (!id) {
-    id = 'dev_' + Math.random().toString(36).substring(2, 11) + Date.now().toString(36);
-    localStorage.setItem("opos_device_id", id);
+// Funciones para persistir el ID en Cookie de larga duración (1 año) + localStorage
+function setCookie(name, value, days = 365) {
+  const date = new Date();
+  date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+  document.cookie = `${name}=${value};expires=${date.toUTCString()};path=/;SameSite=Lax`;
+}
+
+function getCookie(name) {
+  const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+  return match ? match[2] : null;
+}
+
+function getOrCreateDeviceId() {
+  // 1. Intentar leer de localStorage o de Cookie
+  let id = null;
+  try {
+    id = localStorage.getItem("opos_device_id");
+  } catch (e) {
+    console.warn("localStorage no disponible");
   }
+
+  if (!id) {
+    id = getCookie("opos_device_id");
+  }
+
+  // 2. Si no existía, crear uno nuevo
+  if (!id) {
+    id = 'dev_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
+  }
+
+  // 3. Asegurar guardado en ambos sitios
+  try {
+    localStorage.setItem("opos_device_id", id);
+  } catch (e) {}
+  setCookie("opos_device_id", id, 365);
+
   return id;
 }
 
 export default function App() {
-  const [deviceId] = useState(getDeviceId);
+  const [deviceId] = useState(() => getOrCreateDeviceId());
   const [pages, setPages] = useState([]);
   const [checking, setChecking] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ name: '', url: '', notify_email: '' });
 
   const loadPages = async () => {
+    if (!deviceId) return;
     try {
       const res = await fetch(`${API_URL}/api/pages?device_id=${encodeURIComponent(deviceId)}`);
       const data = await res.json();
@@ -93,12 +123,12 @@ export default function App() {
   return (
     <div style={{ maxWidth: 840, margin: '40px auto', padding: '0 20px', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
       
-      {/* Cabecera directa sin logins */}
+      {/* Cabecera */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: '#111827' }}>Monitor de Páginas Web</h1>
           <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>
-            Actualización automática programada cada 15 minutos
+            Comprobación automática cada 15 minutos
           </p>
         </div>
         <button
@@ -110,7 +140,7 @@ export default function App() {
         </button>
       </div>
 
-      {/* RECUADRO ROJO DESTACADO (Solo si este dispositivo tiene avisos) */}
+      {/* RECUADRO ROJO DESTACADO (Solo si este dispositivo tiene alertas de cambios) */}
       {alteredPages.length > 0 && (
         <div style={{ marginBottom: 32 }}>
           <h2 style={{ fontSize: 14, fontWeight: 800, color: '#b91c1c', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
@@ -174,7 +204,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Lista de páginas bajo seguimiento */}
+      {/* Lista de páginas del dispositivo */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <h2 style={{ fontSize: 15, fontWeight: 700, color: '#374151', textTransform: 'uppercase', margin: 0 }}>
           Páginas bajo seguimiento ({pages.length})
@@ -236,6 +266,11 @@ export default function App() {
             </div>
           ))
         )}
+      </div>
+
+      {/* Pie con identificador de dispositivo persistente */}
+      <div style={{ marginTop: 48, borderTop: '1px solid #f3f4f6', paddingTop: 16, textAlign: 'center', fontSize: 11, color: '#9ca3af' }}>
+        Identificador de sesión: <code style={{ backgroundColor: '#f3f4f6', padding: '2px 6px', borderRadius: 4 }}>{deviceId}</code>
       </div>
 
       {/* Modal para añadir página */}
