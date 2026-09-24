@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 
 const API_URL = "https://gsusalert.onrender.com";
 
-// Funciones para persistir el ID en Cookie de larga duración (1 año) + localStorage
 function setCookie(name, value, days = 365) {
   const date = new Date();
   date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
@@ -15,24 +14,19 @@ function getCookie(name) {
 }
 
 function getOrCreateDeviceId() {
-  // 1. Intentar leer de localStorage o de Cookie
   let id = null;
   try {
     id = localStorage.getItem("opos_device_id");
-  } catch (e) {
-    console.warn("localStorage no disponible");
-  }
+  } catch (e) {}
 
   if (!id) {
     id = getCookie("opos_device_id");
   }
 
-  // 2. Si no existía, crear uno nuevo
   if (!id) {
     id = 'dev_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
   }
 
-  // 3. Asegurar guardado en ambos sitios
   try {
     localStorage.setItem("opos_device_id", id);
   } catch (e) {}
@@ -47,6 +41,7 @@ export default function App() {
   const [checking, setChecking] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ name: '', url: '', notify_email: '' });
+  const [copied, setCopied] = useState(false);
 
   const loadPages = async () => {
     if (!deviceId) return;
@@ -72,7 +67,6 @@ export default function App() {
     try {
       const res = await fetch(`${API_URL}/api/check?device_id=${encodeURIComponent(deviceId)}`, { method: 'POST' });
       const data = await res.json();
-      alert(`Comprobación finalizada. Cambios detectados: ${data.changes_detected ? data.changes_detected.length : 0}`);
       await loadPages();
     } catch (e) {
       alert("Error al comprobar: " + e.message);
@@ -100,10 +94,10 @@ export default function App() {
         setForm({ name: '', url: '', notify_email: form.notify_email });
         loadPages();
       } else {
-        alert("Error: " + data.message);
+        alert("Error: " + (data.message || data.detail));
       }
     } catch (e) {
-      alert("Error: " + e.message);
+      alert("Error de conexión");
     }
   };
 
@@ -113,225 +107,465 @@ export default function App() {
   };
 
   const handleDelete = async (id, name) => {
-    if (!window.confirm(`¿Eliminar la monitorización de "${name}"?`)) return;
+    if (!window.confirm(`¿Dejar de vigilar "${name}"?`)) return;
     await fetch(`${API_URL}/api/pages/${id}`, { method: 'DELETE' });
     loadPages();
+  };
+
+  const copyDeviceId = () => {
+    navigator.clipboard.writeText(deviceId);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const alteredPages = pages.filter(p => p.has_changed);
 
   return (
-    <div style={{ maxWidth: 840, margin: '40px auto', padding: '0 20px', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      
-      {/* Cabecera */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: '#111827' }}>Monitor de Páginas Web</h1>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>
-            Comprobación automática cada 15 minutos
-          </p>
-        </div>
-        <button
-          onClick={handleManualCheck}
-          disabled={checking}
-          style={{ padding: '10px 18px', backgroundColor: checking ? '#e5e7eb' : '#dc2626', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: checking ? 'not-allowed' : 'pointer' }}
-        >
-          {checking ? '🔄 Comprobando...' : '🔄 Comprobar ahora'}
-        </button>
-      </div>
+    <div style={{
+      minHeight: '100vh',
+      backgroundColor: '#fbfbfb',
+      color: '#1a1a1a',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+      WebkitFontSmoothing: 'antialiased',
+      padding: '40px 16px 80px'
+    }}>
+      <div style={{ maxWidth: 720, margin: '0 auto' }}>
 
-      {/* RECUADRO ROJO DESTACADO (Solo si este dispositivo tiene alertas de cambios) */}
-      {alteredPages.length > 0 && (
-        <div style={{ marginBottom: 32 }}>
-          <h2 style={{ fontSize: 14, fontWeight: 800, color: '#b91c1c', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
-            🚨 Alerta de modificaciones detectadas
-          </h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {alteredPages.map(page => (
-              <div
-                key={`alert-${page.id}`}
-                style={{
-                  border: '2px solid #dc2626',
-                  backgroundColor: '#fef2f2',
-                  borderRadius: 12,
-                  padding: '20px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  boxShadow: '0 4px 6px -1px rgba(220, 38, 38, 0.1)'
-                }}
-              >
-                <div>
-                  <span style={{ backgroundColor: '#dc2626', color: '#ffffff', fontSize: 11, fontWeight: 800, padding: '3px 8px', borderRadius: 6, textTransform: 'uppercase' }}>
-                    ¡Cambio detectado!
-                  </span>
-                  <h3 style={{ margin: '8px 0 4px 0', fontSize: 18, fontWeight: 700, color: '#991b1b' }}>{page.name}</h3>
-                  <div style={{ fontSize: 13, color: '#4b5563' }}>
-                    Modificación registrada: <b>{page.changed_at}</b> · Aviso enviado a: <b>{page.notify_email}</b>
+        {/* Encabezado principal */}
+        <header style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          marginBottom: 36,
+          paddingBottom: 24,
+          borderBottom: '1px solid #ebebeb'
+        }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <span style={{
+                display: 'inline-block',
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                backgroundColor: checking ? '#f59e0b' : '#10b981',
+                boxShadow: checking ? '0 0 0 3px #fef3c7' : '0 0 0 3px #d1fae5'
+              }} />
+              <span style={{ fontSize: 12, fontWeight: 600, color: '#666', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                {checking ? 'Rastreando cambios...' : 'Vigilancia en segundo plano'}
+              </span>
+            </div>
+            <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0, letterSpacing: '-0.02em', color: '#111' }}>
+              OposAlert
+            </h1>
+            <p style={{ margin: '4px 0 0', fontSize: 14, color: '#666' }}>
+              Detección y notificación automática de cambios en páginas públicas.
+            </p>
+          </div>
+
+          <button
+            onClick={handleManualCheck}
+            disabled={checking}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '8px 14px',
+              fontSize: 13,
+              fontWeight: 500,
+              color: checking ? '#999' : '#222',
+              backgroundColor: '#fff',
+              border: '1px solid #dcdcdc',
+              borderRadius: 6,
+              cursor: checking ? 'not-allowed' : 'pointer',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
+            }}
+          >
+            <span style={{ display: 'inline-block', transform: checking ? 'rotate(180deg)' : 'none', transition: 'transform 0.5s ease' }}>
+              ↻
+            </span>
+            {checking ? 'Comprobando' : 'Comprobar'}
+          </button>
+        </header>
+
+        {/* Notificaciones de cambio detectado */}
+        {alteredPages.length > 0 && (
+          <section style={{ marginBottom: 36 }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 12
+            }}>
+              <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#b91c1c' }}>
+                Cambios detectados ({alteredPages.length})
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {alteredPages.map(page => (
+                <div
+                  key={`alert-${page.id}`}
+                  style={{
+                    backgroundColor: '#fff',
+                    border: '1px solid #fecaca',
+                    borderLeft: '4px solid #dc2626',
+                    borderRadius: 8,
+                    padding: '16px 18px',
+                    boxShadow: '0 2px 4px rgba(220, 38, 38, 0.05)'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
+                    <div>
+                      <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: '#991b1b' }}>
+                        {page.name}
+                      </h2>
+                      <div style={{ fontSize: 13, color: '#666', marginTop: 4 }}>
+                        Detectado: <strong style={{ color: '#333' }}>{page.changed_at}</strong> · Aviso enviado a: <span style={{ color: '#333' }}>{page.notify_email}</span>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                      <a
+                        href={page.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          padding: '6px 12px',
+                          fontSize: 13,
+                          fontWeight: 500,
+                          color: '#fff',
+                          backgroundColor: '#dc2626',
+                          borderRadius: 6,
+                          textDecoration: 'none'
+                        }}
+                      >
+                        Abrir web ↗
+                      </a>
+                      <button
+                        onClick={() => handleDismiss(page.id)}
+                        style={{
+                          padding: '6px 12px',
+                          fontSize: 13,
+                          fontWeight: 500,
+                          color: '#555',
+                          backgroundColor: '#f3f4f6',
+                          border: 'none',
+                          borderRadius: 6,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Visto
+                      </button>
+                    </div>
                   </div>
                 </div>
+              ))}
+            </div>
+          </section>
+        )}
 
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                  <a
-                    href={page.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{
-                      padding: '10px 18px',
-                      backgroundColor: '#dc2626',
-                      color: '#ffffff',
-                      textDecoration: 'none',
-                      borderRadius: 8,
-                      fontWeight: 700,
-                      fontSize: 14,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 6
-                    }}
-                  >
-                    🔗 Ir a la web
-                  </a>
-                  <button
-                    onClick={() => handleDismiss(page.id)}
-                    style={{ padding: '9px 14px', border: '1px solid #d1d5db', borderRadius: 8, backgroundColor: '#ffffff', color: '#374151', cursor: 'pointer', fontWeight: 600, fontSize: 13 }}
-                  >
-                    Descartar aviso
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Lista de páginas del dispositivo */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <h2 style={{ fontSize: 15, fontWeight: 700, color: '#374151', textTransform: 'uppercase', margin: 0 }}>
-          Páginas bajo seguimiento ({pages.length})
-        </h2>
-        <button
-          onClick={() => setShowModal(true)}
-          style={{ padding: '8px 16px', backgroundColor: '#111827', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: 'pointer' }}
-        >
-          + Añadir nueva web
-        </button>
-      </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {pages.length === 0 ? (
-          <div style={{ padding: 48, textAlign: 'center', border: '1px dashed #d1d5db', borderRadius: 12, color: '#6b7280' }}>
-            <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#374151' }}>Aún no tienes páginas añadidas en este dispositivo.</p>
-            <p style={{ margin: '6px 0 0', fontSize: 13 }}>Pulsa en <b>"+ Añadir nueva web"</b> para comenzar a monitorizar cambios y recibir avisos.</p>
-          </div>
-        ) : (
-          pages.map(page => (
-            <div
-              key={page.id}
+        {/* Listado de páginas en seguimiento */}
+        <section>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'baseline',
+            marginBottom: 16
+          }}>
+            <h2 style={{ fontSize: 14, fontWeight: 600, color: '#444', textTransform: 'uppercase', letterSpacing: '0.04em', margin: 0 }}>
+              Páginas vigiladas ({pages.length})
+            </h2>
+            <button
+              onClick={() => setShowModal(true)}
               style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                padding: '16px 20px',
-                border: page.has_changed ? '2px solid #ef4444' : '1px solid #e5e7eb',
-                borderRadius: 12,
-                backgroundColor: '#ffffff'
+                fontSize: 13,
+                fontWeight: 600,
+                color: '#fff',
+                backgroundColor: '#111',
+                border: 'none',
+                padding: '7px 14px',
+                borderRadius: 6,
+                cursor: 'pointer'
               }}
             >
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 16, color: '#111827' }}>{page.name}</div>
-                <a href={page.url} target="_blank" rel="noreferrer" style={{ fontSize: 13, color: '#4b5563', textDecoration: 'none', display: 'block', marginTop: 2 }}>
-                  {page.url}
-                </a>
-                <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>
-                  ✉️ {page.notify_email} · Última comprobación: {page.last_checked}
+              + Añadir enlace
+            </button>
+          </div>
+
+          {pages.length === 0 ? (
+            <div style={{
+              backgroundColor: '#fff',
+              border: '1px dashed #d1d5db',
+              borderRadius: 8,
+              padding: '48px 24px',
+              textAlign: 'center'
+            }}>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 500, color: '#333' }}>
+                No tienes ninguna página en este dispositivo
+              </p>
+              <p style={{ margin: '6px 0 16px', fontSize: 13, color: '#777' }}>
+                Añade el enlace de una convocatoria o boletín para recibir un correo en cuanto se actualice.
+              </p>
+              <button
+                onClick={() => setShowModal(true)}
+                style={{
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: '#111',
+                  backgroundColor: '#f3f4f6',
+                  border: '1px solid #dcdcdc',
+                  padding: '7px 14px',
+                  borderRadius: 6,
+                  cursor: 'pointer'
+                }}
+              >
+                Añadir la primera página
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {pages.map(page => (
+                <div
+                  key={page.id}
+                  style={{
+                    backgroundColor: '#fff',
+                    border: '1px solid #e5e5e5',
+                    borderRadius: 8,
+                    padding: '14px 18px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 16
+                  }}
+                >
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 15, fontWeight: 600, color: '#111' }}>
+                        {page.name}
+                      </span>
+                    </div>
+                    <div style={{
+                      fontSize: 13,
+                      color: '#666',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      marginTop: 2
+                    }}>
+                      <a href={page.url} target="_blank" rel="noreferrer" style={{ color: '#666', textDecoration: 'none' }}>
+                        {page.url}
+                      </a>
+                    </div>
+                    <div style={{ fontSize: 12, color: '#888', marginTop: 4, display: 'flex', gap: 12 }}>
+                      <span>Aviso a: <strong style={{ fontWeight: 500, color: '#555' }}>{page.notify_email}</strong></span>
+                      <span>·</span>
+                      <span>Última revisión: {page.last_checked}</span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                    <a
+                      href={page.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        padding: '5px 10px',
+                        fontSize: 12,
+                        fontWeight: 500,
+                        color: '#444',
+                        backgroundColor: '#f8f8f8',
+                        border: '1px solid #e0e0e0',
+                        borderRadius: 5,
+                        textDecoration: 'none'
+                      }}
+                    >
+                      Visitar
+                    </a>
+                    <button
+                      onClick={() => handleDelete(page.id, page.name)}
+                      title="Eliminar"
+                      style={{
+                        padding: '5px 10px',
+                        fontSize: 12,
+                        fontWeight: 500,
+                        color: '#991b1b',
+                        backgroundColor: '#fff',
+                        border: '1px solid #fecaca',
+                        borderRadius: 5,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Borrar
+                    </button>
+                  </div>
                 </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: 8 }}>
-                <a
-                  href={page.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ padding: '6px 12px', fontSize: 12, border: '1px solid #d1d5db', borderRadius: 6, textDecoration: 'none', color: '#374151', backgroundColor: '#f9fafb' }}
-                >
-                  Abrir
-                </a>
-                <button
-                  onClick={() => handleDelete(page.id, page.name)}
-                  style={{ padding: '6px 12px', fontSize: 12, border: '1px solid #fee2e2', borderRadius: 6, backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer', fontWeight: 600 }}
-                >
-                  Eliminar
-                </button>
-              </div>
+              ))}
             </div>
-          ))
+          )}
+        </section>
+
+        {/* Modal de añadir página */}
+        {showModal && (
+          <div style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.4)',
+            backdropFilter: 'blur(2px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+            zIndex: 100
+          }}>
+            <div style={{
+              backgroundColor: '#fff',
+              borderRadius: 10,
+              width: '100%',
+              maxWidth: 420,
+              padding: 24,
+              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)',
+              border: '1px solid #e5e5e5'
+            }}>
+              <h3 style={{ margin: '0 0 16px', fontSize: 17, fontWeight: 600, color: '#111' }}>
+                Añadir página a vigilar
+              </h3>
+
+              <form onSubmit={handleAddSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 5, color: '#333' }}>
+                    Nombre descriptivo
+                  </label>
+                  <input
+                    required
+                    type="text"
+                    value={form.name}
+                    onChange={e => setForm({ ...form, name: e.target.value })}
+                    placeholder="Ej. Convocatoria Auxiliares"
+                    style={{
+                      width: '100%',
+                      padding: '8px 11px',
+                      fontSize: 14,
+                      border: '1px solid #ccc',
+                      borderRadius: 6,
+                      boxSizing: 'border-box',
+                      outline: 'none'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 5, color: '#333' }}>
+                    Dirección web (URL exacta)
+                  </label>
+                  <input
+                    required
+                    type="url"
+                    value={form.url}
+                    onChange={e => setForm({ ...form, url: e.target.value })}
+                    placeholder="https://www.boe.es/..."
+                    style={{
+                      width: '100%',
+                      padding: '8px 11px',
+                      fontSize: 14,
+                      border: '1px solid #ccc',
+                      borderRadius: 6,
+                      boxSizing: 'border-box',
+                      outline: 'none'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 5, color: '#333' }}>
+                    Email donde recibir el aviso
+                  </label>
+                  <input
+                    required
+                    type="email"
+                    value={form.notify_email}
+                    onChange={e => setForm({ ...form, notify_email: e.target.value })}
+                    placeholder="tu@email.com"
+                    style={{
+                      width: '100%',
+                      padding: '8px 11px',
+                      fontSize: 14,
+                      border: '1px solid #ccc',
+                      borderRadius: 6,
+                      boxSizing: 'border-box',
+                      outline: 'none'
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 10 }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowModal(false)}
+                    style={{
+                      padding: '8px 14px',
+                      fontSize: 13,
+                      fontWeight: 500,
+                      color: '#555',
+                      backgroundColor: '#f3f4f6',
+                      border: 'none',
+                      borderRadius: 6,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    style={{
+                      padding: '8px 16px',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: '#fff',
+                      backgroundColor: '#111',
+                      border: 'none',
+                      borderRadius: 6,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Guardar
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
         )}
-      </div>
 
-      {/* Pie con identificador de dispositivo persistente */}
-      <div style={{ marginTop: 48, borderTop: '1px solid #f3f4f6', paddingTop: 16, textAlign: 'center', fontSize: 11, color: '#9ca3af' }}>
-        Identificador de sesión: <code style={{ backgroundColor: '#f3f4f6', padding: '2px 6px', borderRadius: 4 }}>{deviceId}</code>
-      </div>
-
-      {/* Modal para añadir página */}
-      {showModal && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
-          <form
-            onSubmit={handleAddSubmit}
-            style={{ backgroundColor: '#ffffff', padding: 28, borderRadius: 16, width: '100%', maxWidth: 440, display: 'flex', flexDirection: 'column', gap: 16 }}
+        {/* Pie discreto */}
+        <footer style={{
+          marginTop: 64,
+          paddingTop: 20,
+          borderTop: '1px solid #ebebeb',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          fontSize: 12,
+          color: '#888'
+        }}>
+          <div>
+            Sesión: <code style={{ fontFamily: 'monospace', backgroundColor: '#f0f0f0', padding: '2px 5px', borderRadius: 4, color: '#444' }}>{deviceId}</code>
+          </div>
+          <button
+            onClick={copyDeviceId}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              fontSize: 12,
+              color: '#555',
+              cursor: 'pointer',
+              textDecoration: 'underline'
+            }}
           >
-            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Añadir página a monitorizar</h3>
-            <div>
-              <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Nombre de la página</label>
-              <input
-                required
-                style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #d1d5db', boxSizing: 'border-box' }}
-                value={form.name}
-                onChange={e => setForm({ ...form, name: e.target.value })}
-                placeholder="Ej. BOE Convocatorias"
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Dirección web (URL)</label>
-              <input
-                required
-                type="url"
-                style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #d1d5db', boxSizing: 'border-box' }}
-                value={form.url}
-                onChange={e => setForm({ ...form, url: e.target.value })}
-                placeholder="https://..."
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Correo para recibir la alerta</label>
-              <input
-                required
-                type="email"
-                style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #d1d5db', boxSizing: 'border-box' }}
-                value={form.notify_email}
-                onChange={e => setForm({ ...form, notify_email: e.target.value })}
-                placeholder="tu@email.com"
-              />
-            </div>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 8 }}>
-              <button
-                type="button"
-                onClick={() => setShowModal(false)}
-                style={{ padding: '8px 16px', border: '1px solid #d1d5db', borderRadius: 8, background: '#fff', cursor: 'pointer' }}
-              >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                style={{ padding: '8px 16px', borderRadius: 8, background: '#dc2626', color: '#fff', border: 'none', fontWeight: 600, cursor: 'pointer' }}
-              >
-                Guardar web
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+            {copied ? 'Copiado al portapapeles' : 'Copiar ID'}
+          </button>
+        </footer>
 
+      </div>
     </div>
   );
 }
