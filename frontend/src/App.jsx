@@ -1,317 +1,644 @@
 import React, { useState, useEffect } from 'react';
 
-// Iconos SVG
-const BellIcon = () => (
-  <svg className="w-6 h-6 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-  </svg>
-);
+const API_URL = "https://gsusalert.onrender.com";
 
-const PlusIcon = () => (
-  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-  </svg>
-);
+function setCookie(name, value, days = 365) {
+  const date = new Date();
+  date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+  document.cookie = `${name}=${value};expires=${date.toUTCString()};path=/;SameSite=Lax`;
+}
 
-const TrashIcon = () => (
-  <svg className="w-4 h-4 text-zinc-400 hover:text-red-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-  </svg>
-);
+function getCookie(name) {
+  const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+  return match ? match[2] : null;
+}
 
-const RefreshIcon = ({ spin }) => (
-  <svg className={`w-5 h-5 ${spin ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-  </svg>
-);
+function getOrCreateDeviceId() {
+  let id = null;
+  try {
+    id = localStorage.getItem("opos_device_id");
+  } catch (e) {}
 
-const ExternalIcon = () => (
-  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-  </svg>
-);
+  if (!id) {
+    id = getCookie("opos_device_id");
+  }
 
-const API_BASE_URL = 'https://gsusalert.onrender.com';
+  if (!id) {
+    id = 'dev_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
+  }
+
+  try {
+    localStorage.setItem("opos_device_id", id);
+  } catch (e) {}
+  setCookie("opos_device_id", id, 365);
+
+  return id;
+}
 
 export default function App() {
-  const [alerts, setAlerts] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [deviceId] = useState(() => getOrCreateDeviceId());
+  const [pages, setPages] = useState([]);
   const [checking, setChecking] = useState(false);
   const [showModal, setShowModal] = useState(false);
-  const [formData, setFormData] = useState({ title: '', url: '', email: '' });
-  const [message, setMessage] = useState(null);
+  const [form, setForm] = useState({ name: '', url: '', notify_email: '' });
+  const [filter, setFilter] = useState('all'); // 'all' o 'alerts'
 
-  const fetchAlerts = async () => {
+  const loadPages = async () => {
+    if (!deviceId) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/alerts`);
-      if (!res.ok) throw new Error("Error de conexión");
+      const res = await fetch(`${API_URL}/api/pages?device_id=${encodeURIComponent(deviceId)}`);
       const data = await res.json();
-      setAlerts(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error(err);
-      setAlerts([]);
-    } finally {
-      setLoading(false);
+      if (Array.isArray(data)) {
+        setPages(data);
+      }
+    } catch (e) {
+      console.error(e);
     }
   };
 
   useEffect(() => {
-    fetchAlerts();
-  }, []);
+    loadPages();
+    const interval = setInterval(loadPages, 30000);
+    return () => clearInterval(interval);
+  }, [deviceId]);
 
-  const handleCreate = async (e) => {
+  const handleManualCheck = async () => {
+    setChecking(true);
+    try {
+      const res = await fetch(`${API_URL}/api/check?device_id=${encodeURIComponent(deviceId)}`, { method: 'POST' });
+      await res.json();
+      await loadPages();
+    } catch (e) {
+      alert("Error al comprobar: " + e.message);
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const handleAddSubmit = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch(`${API_BASE_URL}/api/alerts`, {
+      const res = await fetch(`${API_URL}/api/pages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          device_id: deviceId,
+          name: form.name,
+          url: form.url,
+          notify_email: form.notify_email
+        })
       });
-      if (res.ok) {
-        setFormData({ title: '', url: '', email: '' });
-        setShowModal(false);
-        fetchAlerts();
-        setMessage({ text: 'Alerta creada con éxito', type: 'success' });
-        setTimeout(() => setMessage(null), 4000);
-      }
-    } catch (err) {
-      setMessage({ text: 'Error al crear alerta', type: 'error' });
-    }
-  };
-
-  const handleDelete = async (id) => {
-    try {
-      await fetch(`${API_BASE_URL}/api/alerts/${id}`, { method: 'DELETE' });
-      fetchAlerts();
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleTriggerCheck = async () => {
-    setChecking(true);
-    setMessage({ text: 'Analizando páginas en busca de contenido nuevo...', type: 'info' });
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/check`, { method: 'POST' });
       const data = await res.json();
-      
-      await fetchAlerts();
-      setChecking(false);
-
-      if (data.newAdditionsCount && data.newAdditionsCount > 0) {
-        setMessage({ text: `¡Atención! Se han añadido datos nuevos en ${data.newAdditionsCount} página(s).`, type: 'success' });
+      if (data.status === 'success') {
+        setShowModal(false);
+        setForm({ name: '', url: '', notify_email: form.notify_email });
+        loadPages();
       } else {
-        setMessage({ text: 'Comprobación finalizada: No se ha añadido contenido nuevo en ninguna página.', type: 'neutral' });
+        alert("Error: " + (data.message || data.detail));
       }
-
-      setTimeout(() => setMessage(null), 5000);
-    } catch (err) {
-      setChecking(false);
-      setMessage({ text: 'Ocurrió un error al intentar verificar las páginas.', type: 'error' });
-      setTimeout(() => setMessage(null), 4000);
+    } catch (e) {
+      alert("Error de conexión");
     }
   };
+
+  const handleDismiss = async (id) => {
+    await fetch(`${API_URL}/api/pages/${id}/dismiss`, { method: 'POST' });
+    loadPages();
+  };
+
+  const handleDelete = async (id, name) => {
+    if (!window.confirm(`¿Dejar de monitorizar "${name}"?`)) return;
+    await fetch(`${API_URL}/api/pages/${id}`, { method: 'DELETE' });
+    loadPages();
+  };
+
+  const alteredPages = pages.filter(p => p.has_changed);
+  const displayedPages = filter === 'alerts' ? alteredPages : pages;
 
   return (
-    <div className="flex flex-col md:flex-row h-screen bg-black text-white font-sans overflow-hidden">
-
-      {/* BARRA LATERAL (SIDEBAR) */}
-      <aside className="w-full md:w-64 bg-zinc-950 p-6 flex flex-col justify-between border-b md:border-b-0 md:border-r border-zinc-900 flex-shrink-0">
+    <div style={{
+      display: 'flex',
+      minHeight: '100vh',
+      backgroundColor: '#000000',
+      color: '#ffffff',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Circular Spotify Text", Roboto, Helvetica, Arial, sans-serif'
+    }}>
+      
+      {/* BARRA LATERAL ESTILO SPOTIFY */}
+      <aside style={{
+        width: 250,
+        backgroundColor: '#121212',
+        borderRadius: 8,
+        margin: '8px 0 8px 8px',
+        padding: '24px 16px',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        flexShrink: 0
+      }}>
         <div>
-          <div className="flex items-center gap-3 mb-8">
-            <div className="p-2 bg-emerald-500/10 rounded-full">
-              <BellIcon />
+          {/* Logo / Nombre */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 8px', marginBottom: 28 }}>
+            <div style={{
+              width: 32,
+              height: 32,
+              borderRadius: '50%',
+              backgroundColor: '#1ed760',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 900,
+              color: '#000'
+            }}>
+              ⚡
             </div>
-            <span className="text-xl font-bold tracking-tight text-white">GsusAlert</span>
+            <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.5 }}>OposAlert</span>
           </div>
 
-          <nav className="space-y-4 text-sm font-semibold text-zinc-400">
-            <div className="text-white flex items-center gap-3 cursor-pointer p-2 rounded-lg bg-zinc-900">
-              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-              Todas tus Alertas
-            </div>
+          {/* Menú principal */}
+          <nav style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <button
+              onClick={() => setFilter('all')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 14,
+                padding: '10px 12px',
+                borderRadius: 6,
+                border: 'none',
+                backgroundColor: filter === 'all' ? '#282828' : 'transparent',
+                color: filter === 'all' ? '#ffffff' : '#b3b3b3',
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: 'pointer',
+                textAlign: 'left'
+              }}
+            >
+              <span>🏠</span> Inicio
+            </button>
+            <button
+              onClick={() => setFilter('alerts')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 12px',
+                borderRadius: 6,
+                border: 'none',
+                backgroundColor: filter === 'alerts' ? '#282828' : 'transparent',
+                color: filter === 'alerts' ? '#ffffff' : '#b3b3b3',
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <span>🔔</span> Novedades
+              </div>
+              {alteredPages.length > 0 && (
+                <span style={{
+                  backgroundColor: '#e91429',
+                  color: '#fff',
+                  fontSize: 11,
+                  fontWeight: 800,
+                  borderRadius: 12,
+                  padding: '2px 8px'
+                }}>
+                  {alteredPages.length}
+                </span>
+              )}
+            </button>
           </nav>
+
+          {/* Sección biblioteca / añadir */}
+          <div style={{
+            marginTop: 24,
+            padding: 16,
+            backgroundColor: '#1f1f1f',
+            borderRadius: 8
+          }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Vigila una nueva web</div>
+            <div style={{ fontSize: 12, color: '#b3b3b3', marginBottom: 16 }}>
+              Introduce el enlace de una convocatoria o boletín para recibir avisos.
+            </div>
+            <button
+              onClick={() => setShowModal(true)}
+              style={{
+                backgroundColor: '#ffffff',
+                color: '#000000',
+                border: 'none',
+                padding: '8px 16px',
+                borderRadius: 20,
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: 'pointer'
+              }}
+            >
+              Crear alerta
+            </button>
+          </div>
         </div>
 
-        <button
-          onClick={() => setShowModal(true)}
-          className="mt-6 flex items-center justify-center gap-2 w-full bg-emerald-500 hover:bg-emerald-400 text-black font-bold py-3 rounded-full transition-all duration-200 transform hover:scale-105 shadow-lg shadow-emerald-500/20"
-        >
-          <PlusIcon />
-          <span>Nueva Alerta</span>
-        </button>
+        {/* Info sesión al pie del sidebar */}
+        <div style={{ fontSize: 11, color: '#727272', padding: '0 8px' }}>
+          <div>Dispositivo:</div>
+          <div style={{ fontFamily: 'monospace', color: '#a7a7a7', marginTop: 2 }}>{deviceId}</div>
+        </div>
       </aside>
 
-      {/* ÁREA PRINCIPAL */}
-      <main className="flex-1 bg-zinc-900/50 p-6 md:p-8 overflow-y-auto pb-28">
+      {/* ÁREA DE CONTENIDO PRINCIPAL */}
+      <main style={{
+        flex: 1,
+        backgroundColor: '#121212',
+        borderRadius: 8,
+        margin: '8px 8px 8px 8px',
+        overflowY: 'auto',
+        display: 'flex',
+        flexDirection: 'column'
+      }}>
         
-        {/* ENCABEZADO Y NOTIFICACIÓN */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">Páginas Monitorizadas</h1>
-            <p className="text-xs md:text-sm text-zinc-400 mt-1">Detecta únicamente la adición de nueva información</p>
+        {/* Cabecera superior translúcida */}
+        <div style={{
+          position: 'sticky',
+          top: 0,
+          backgroundColor: 'rgba(18, 18, 18, 0.85)',
+          backdropFilter: 'blur(10px)',
+          padding: '16px 32px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          zIndex: 10,
+          borderBottom: '1px solid rgba(255, 255, 255, 0.05)'
+        }}>
+          <div style={{ fontSize: 14, color: '#b3b3b3', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              backgroundColor: checking ? '#ffa42b' : '#1ed760',
+              display: 'inline-block'
+            }} />
+            {checking ? 'Rastreando cambios en segundo plano...' : 'Revisión periódica activa cada 15 min'}
           </div>
 
-          {message && (
-            <div className={`text-xs px-4 py-2.5 rounded-full font-medium transition-all shadow-md ${
-              message.type === 'success' ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300' :
-              message.type === 'error' ? 'bg-red-500/20 border border-red-500/40 text-red-300' :
-              message.type === 'info' ? 'bg-blue-500/20 border border-blue-500/40 text-blue-300' :
-              'bg-zinc-800 border border-zinc-700 text-zinc-300'
-            }`}>
-              {message.text}
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <button
+              onClick={handleManualCheck}
+              disabled={checking}
+              style={{
+                backgroundColor: '#ffffff',
+                color: '#000000',
+                border: 'none',
+                padding: '10px 20px',
+                borderRadius: 20,
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: checking ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {checking ? 'Comprobando...' : 'Comprobar ahora'}
+            </button>
+          </div>
+        </div>
+
+        {/* CUERPO: CUADRÍCULA DE CUADRADITOS / CARÁTULAS */}
+        <div style={{ padding: '24px 32px 64px' }}>
+          
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 20 }}>
+            <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0, letterSpacing: -0.5 }}>
+              {filter === 'alerts' ? 'Modificaciones detectadas' : 'Páginas en seguimiento'}
+            </h2>
+            <span style={{ fontSize: 13, color: '#b3b3b3', fontWeight: 600 }}>
+              {displayedPages.length} {displayedPages.length === 1 ? 'página' : 'páginas'}
+            </span>
+          </div>
+
+          {displayedPages.length === 0 ? (
+            <div style={{
+              backgroundColor: '#181818',
+              borderRadius: 8,
+              padding: '64px 32px',
+              textAlign: 'center',
+              color: '#b3b3b3'
+            }}>
+              <div style={{ fontSize: 48, marginBottom: 16 }}>📋</div>
+              <h3 style={{ color: '#fff', fontSize: 18, margin: '0 0 8px' }}>
+                {filter === 'alerts' ? 'No hay novedades recientes' : 'Tu lista de alertas está vacía'}
+              </h3>
+              <p style={{ fontSize: 14, maxWidth: 400, margin: '0 auto 20px' }}>
+                {filter === 'alerts'
+                  ? 'Todas las páginas vigiladas permanecen sin modificaciones desde la última lectura.'
+                  : 'Pulsa en "+ Crear alerta" en el panel lateral para empezar a monitorizar páginas.'}
+              </p>
+            </div>
+          ) : (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+              gap: 24
+            }}>
+              {displayedPages.map(page => {
+                // Captura en tiempo real del frontal de la web
+                const screenshotUrl = `https://s.wordpress.com/mshots/v1/${encodeURIComponent(page.url)}?w=600`;
+
+                return (
+                  <div
+                    key={page.id}
+                    style={{
+                      backgroundColor: '#181818',
+                      borderRadius: 8,
+                      padding: 16,
+                      position: 'relative',
+                      transition: 'background-color 0.2s ease, transform 0.2s ease',
+                      border: page.has_changed ? '2px solid #e91429' : '1px solid rgba(255,255,255,0.05)',
+                      display: 'flex',
+                      flexDirection: 'column'
+                    }}
+                  >
+                    {/* FOTO CUADRADA DEL INICIO DE LA WEB (ESTILO CARÁTULA) */}
+                    <div style={{
+                      position: 'relative',
+                      width: '100%',
+                      paddingTop: '100%', // Proporción 1:1 cuadrada
+                      borderRadius: 6,
+                      overflow: 'hidden',
+                      backgroundColor: '#282828',
+                      marginBottom: 16,
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.5)'
+                    }}>
+                      <img
+                        src={screenshotUrl}
+                        alt={page.name}
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover',
+                          objectPosition: 'top center'
+                        }}
+                        onError={(e) => {
+                          // Si falla la captura externa, muestra una carátula con fondo e inicial
+                          e.target.style.display = 'none';
+                        }}
+                      />
+
+                      {/* Etiqueta si hay cambio */}
+                      {page.has_changed && (
+                        <div style={{
+                          position: 'absolute',
+                          top: 8,
+                          left: 8,
+                          backgroundColor: '#e91429',
+                          color: '#fff',
+                          fontSize: 10,
+                          fontWeight: 800,
+                          textTransform: 'uppercase',
+                          padding: '3px 8px',
+                          borderRadius: 4,
+                          letterSpacing: 0.5
+                        }}>
+                          ¡Cambio!
+                        </div>
+                      )}
+
+                      {/* Botón flotante para visitar la web directo */}
+                      <a
+                        href={page.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Ir a la web"
+                        style={{
+                          position: 'absolute',
+                          bottom: 8,
+                          right: 8,
+                          width: 44,
+                          height: 44,
+                          borderRadius: '50%',
+                          backgroundColor: page.has_changed ? '#e91429' : '#1ed760',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#000',
+                          textDecoration: 'none',
+                          fontSize: 18,
+                          boxShadow: '0 8px 16px rgba(0,0,0,0.4)'
+                        }}
+                      >
+                        ↗
+                      </a>
+                    </div>
+
+                    {/* TÍTULO Y DETALLES */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <h3 style={{
+                        fontSize: 16,
+                        fontWeight: 700,
+                        margin: '0 0 6px',
+                        color: '#ffffff',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}>
+                        {page.name}
+                      </h3>
+                      
+                      <div style={{
+                        fontSize: 12,
+                        color: '#b3b3b3',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        marginBottom: 4
+                      }}>
+                        {page.url.replace(/^https?:\/\//, '')}
+                      </div>
+
+                      <div style={{ fontSize: 11, color: '#727272' }}>
+                        {page.last_checked}
+                      </div>
+                    </div>
+
+                    {/* ACCIONES AL PIE DEL CUADRADO */}
+                    <div style={{
+                      display: 'flex',
+                      gap: 8,
+                      marginTop: 14,
+                      paddingTop: 12,
+                      borderTop: '1px solid rgba(255,255,255,0.06)'
+                    }}>
+                      {page.has_changed && (
+                        <button
+                          onClick={() => handleDismiss(page.id)}
+                          style={{
+                            flex: 1,
+                            padding: '6px 0',
+                            backgroundColor: '#282828',
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: 4,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Visto
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDelete(page.id, page.name)}
+                        style={{
+                          padding: '6px 10px',
+                          backgroundColor: 'transparent',
+                          color: '#727272',
+                          border: 'none',
+                          borderRadius: 4,
+                          fontSize: 12,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Borrar
+                      </button>
+                    </div>
+
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
-
-        {/* REJILLA DE TARJETAS */}
-        {loading ? (
-          <div className="text-zinc-500 text-sm italic py-12 text-center">Cargando tus monitorizaciones...</div>
-        ) : alerts.length === 0 ? (
-          <div className="text-center py-20 bg-zinc-950/50 rounded-2xl border border-zinc-800/60 p-8">
-            <p className="text-zinc-400 text-base mb-4">No tienes ninguna página añadida todavía.</p>
-            <button
-              onClick={() => setShowModal(true)}
-              className="px-6 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-full text-sm font-semibold transition-colors"
-            >
-              Crear mi primera alerta
-            </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {alerts.map((alert) => (
-              <div
-                key={alert.id}
-                className="group relative bg-zinc-950/80 hover:bg-zinc-800/60 border border-zinc-800/80 hover:border-zinc-700 p-5 rounded-2xl transition-all duration-300 flex flex-col justify-between shadow-lg"
-              >
-                <div>
-                  {/* VISTA PREVIA DEL TEXTO */}
-                  <div className="w-full h-28 bg-gradient-to-br from-zinc-900 to-zinc-950 border border-zinc-800 rounded-xl p-3 mb-4 overflow-hidden relative">
-                    <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest block mb-1">
-                      Inicio del contenido
-                    </span>
-                    <p className="text-xs text-zinc-400 line-clamp-4 leading-relaxed font-sans">
-                      {alert.last_text ? alert.last_text : "Sin capturas iniciales. Se registrará en la primera comprobación."}
-                    </p>
-                    <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-zinc-950 to-transparent"></div>
-                  </div>
-
-                  {/* TÍTULO Y ESTADO */}
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <h3 className="font-bold text-base text-white group-hover:text-emerald-400 transition-colors truncate">
-                      {alert.title}
-                    </h3>
-                    <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full flex-shrink-0 ${
-                      alert.status === 'changed' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' :
-                      alert.status === 'error' ? 'bg-red-500/20 text-red-400 border border-red-500/40' :
-                      'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                    }`}>
-                      {alert.status === 'changed' ? '¡Novedad añadida!' : alert.status === 'error' ? 'Error al leer' : 'Sin cambios'}
-                    </span>
-                  </div>
-
-                  <a
-                    href={alert.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-xs text-zinc-400 hover:text-emerald-400 flex items-center gap-1.5 truncate mb-4 transition-colors"
-                  >
-                    <span className="truncate">{alert.url}</span>
-                    <ExternalIcon />
-                  </a>
-                </div>
-
-                <div className="flex items-center justify-between pt-3 border-t border-zinc-900">
-                  <span className="text-[11px] text-zinc-500 truncate max-w-[140px]">
-                    {alert.email}
-                  </span>
-                  <button
-                    onClick={() => handleDelete(alert.id)}
-                    title="Eliminar monitorización"
-                    className="p-1.5 rounded-lg hover:bg-zinc-800 transition-colors"
-                  >
-                    <TrashIcon />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </main>
 
-      {/* BARRA INFERIOR DE ACCIÓN */}
-      <footer className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800/80 px-6 py-4 flex items-center justify-between z-40">
-        <div className="flex items-center gap-4">
-          <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></div>
-          <div>
-            <p className="text-xs font-bold text-white">GsusAlert Engine</p>
-            <p className="text-[11px] text-zinc-400">{alerts.length} páginas configuradas</p>
-          </div>
-        </div>
-
-        <button
-          onClick={handleTriggerCheck}
-          disabled={checking}
-          className="flex items-center gap-2 bg-white hover:bg-zinc-200 text-black font-bold text-xs md:text-sm px-5 py-2.5 rounded-full transition-all shadow-md disabled:opacity-50"
-        >
-          <RefreshIcon spin={checking} />
-          <span>{checking ? 'Comprobando...' : 'Comprobar Ahora'}</span>
-        </button>
-      </footer>
-
-      {/* MODAL */}
+      {/* MODAL PARA AÑADIR NUEVA PÁGINA (TEMA OSCURO SPOTIFY) */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-zinc-950 border border-zinc-800 p-6 md:p-8 rounded-3xl max-w-md w-full shadow-2xl">
-            <h2 className="text-xl font-bold mb-4 text-white">Añadir nueva página</h2>
-            <form onSubmit={handleCreate} className="space-y-4">
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 16,
+          zIndex: 100
+        }}>
+          <div style={{
+            backgroundColor: '#282828',
+            borderRadius: 12,
+            width: '100%',
+            maxWidth: 440,
+            padding: 32,
+            boxShadow: '0 20px 40px rgba(0,0,0,0.6)'
+          }}>
+            <h3 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 700, color: '#fff' }}>
+              Nueva alerta web
+            </h3>
+            <p style={{ margin: '0 0 24px', fontSize: 13, color: '#b3b3b3' }}>
+              Generará una carátula automática con la foto de la página y te avisará por correo ante cualquier modificación.
+            </p>
+
+            <form onSubmit={handleAddSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1">Nombre o Título</label>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6, color: '#fff' }}>
+                  Nombre de la página
+                </label>
                 <input
+                  required
                   type="text"
-                  placeholder="Ej: Convocatoria Auxiliar Administrativo"
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  required
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-emerald-500 text-white"
+                  value={form.name}
+                  onChange={e => setForm({ ...form, name: e.target.value })}
+                  placeholder="Ej. BOE Oposiciones"
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    fontSize: 14,
+                    backgroundColor: '#3e3e3e',
+                    border: '1px solid transparent',
+                    borderRadius: 6,
+                    color: '#fff',
+                    boxSizing: 'border-box',
+                    outline: 'none'
+                  }}
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1">URL de la web</label>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6, color: '#fff' }}>
+                  Dirección URL
+                </label>
                 <input
+                  required
                   type="url"
-                  placeholder="https://..."
-                  value={formData.url}
-                  onChange={(e) => setFormData({ ...formData, url: e.target.value })}
-                  required
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-emerald-500 text-white"
+                  value={form.url}
+                  onChange={e => setForm({ ...form, url: e.target.value })}
+                  placeholder="https://www.boe.es/..."
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    fontSize: 14,
+                    backgroundColor: '#3e3e3e',
+                    border: '1px solid transparent',
+                    borderRadius: 6,
+                    color: '#fff',
+                    boxSizing: 'border-box',
+                    outline: 'none'
+                  }}
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1">Correo para avisos</label>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6, color: '#fff' }}>
+                  Correo electrónico para avisos
+                </label>
                 <input
-                  type="email"
-                  placeholder="tuemail@ejemplo.com"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   required
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-emerald-500 text-white"
+                  type="email"
+                  value={form.notify_email}
+                  onChange={e => setForm({ ...form, notify_email: e.target.value })}
+                  placeholder="tu@email.com"
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    fontSize: 14,
+                    backgroundColor: '#3e3e3e',
+                    border: '1px solid transparent',
+                    borderRadius: 6,
+                    color: '#fff',
+                    boxSizing: 'border-box',
+                    outline: 'none'
+                  }}
                 />
               </div>
 
-              <div className="flex justify-end gap-3 pt-4">
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 12 }}>
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="px-5 py-2.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 rounded-full text-xs font-bold transition-colors"
+                  style={{
+                    padding: '10px 18px',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#b3b3b3',
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer'
+                  }}
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-black rounded-full text-xs font-bold transition-colors shadow-lg shadow-emerald-500/20"
+                  style={{
+                    padding: '10px 24px',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#000000',
+                    backgroundColor: '#1ed760',
+                    border: 'none',
+                    borderRadius: 20,
+                    cursor: 'pointer'
+                  }}
                 >
                   Guardar
                 </button>
