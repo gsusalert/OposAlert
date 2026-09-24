@@ -1,226 +1,653 @@
 import React, { useState, useEffect } from 'react';
 
-// Si no tienes lucide-react instalado, puedes usar SVG directamente para evitar errores de renderizado.
-const BellIcon = () => (
-  <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-  </svg>
-);
+const API_URL = "https://gsusalert.onrender.com";
 
-const RefreshIcon = ({ spin }) => (
-  <svg className={`w-4 h-4 ${spin ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-  </svg>
-);
+function setCookie(name, value, days = 365) {
+  const date = new Date();
+  date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+  document.cookie = `${name}=${value};expires=${date.toUTCString()};path=/;SameSite=Lax`;
+}
 
-const TrashIcon = () => (
-  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-  </svg>
-);
+function getCookie(name) {
+  const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+  return match ? match[2] : null;
+}
 
-const ExternalIcon = () => (
-  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-  </svg>
-);
+function getOrCreateDeviceId() {
+  let id = null;
+  try {
+    id = localStorage.getItem("opos_device_id");
+  } catch (e) {}
 
-const API_BASE_URL = 'https://gsusalert.onrender.com';
+  if (!id) {
+    id = getCookie("opos_device_id");
+  }
+
+  if (!id) {
+    id = 'dev_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
+  }
+
+  try {
+    localStorage.setItem("opos_device_id", id);
+  } catch (e) {}
+  setCookie("opos_device_id", id, 365);
+
+  return id;
+}
 
 export default function App() {
-  const [alerts, setAlerts] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [deviceId] = useState(() => getOrCreateDeviceId());
+  const [pages, setPages] = useState([]);
   const [checking, setChecking] = useState(false);
-  const [formData, setFormData] = useState({ title: '', url: '', email: '' });
-  const [message, setMessage] = useState(null);
+  const [showModal, setShowModal] = useState(false);
+  const [form, setForm] = useState({ name: '', url: '', notify_email: '' });
+  const [filter, setFilter] = useState('all'); // 'all' o 'alerts'
 
-  const fetchAlerts = async () => {
+  const loadPages = async () => {
+    if (!deviceId) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/alerts`);
-      if (!res.ok) throw new Error("Error en la conexión con el servidor");
+      const res = await fetch(`${API_URL}/api/pages?device_id=${encodeURIComponent(deviceId)}`);
       const data = await res.json();
-      
-      // Control de seguridad: Garantiza que la variable sea siempre una lista
       if (Array.isArray(data)) {
-        setAlerts(data);
-      } else {
-        setAlerts([]);
+        setPages(data);
       }
-    } catch (err) {
-      console.error("Error al cargar alertas:", err);
-      setAlerts([]);
-      setMessage({ type: 'error', text: 'El servidor está arrancando. Reintenta en unos segundos.' });
-    } finally {
-      setLoading(false);
+    } catch (e) {
+      console.error(e);
     }
   };
 
   useEffect(() => {
-    fetchAlerts();
-  }, []);
+    loadPages();
+    const interval = setInterval(loadPages, 30000);
+    return () => clearInterval(interval);
+  }, [deviceId]);
 
-  const handleCreate = async (e) => {
-    e.preventDefault();
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/alerts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
-      });
-      if (res.ok) {
-        setFormData({ title: '', url: '', email: '' });
-        fetchAlerts();
-        setMessage({ type: 'success', text: 'Alerta agregada correctamente' });
-      } else {
-        setMessage({ type: 'error', text: 'No se pudo guardar la alerta' });
-      }
-    } catch (err) {
-      setMessage({ type: 'error', text: 'Error al conectar con la API' });
-    }
-  };
-
-  const handleDelete = async (id) => {
-    try {
-      await fetch(`${API_BASE_URL}/api/alerts/${id}`, { method: 'DELETE' });
-      fetchAlerts();
-    } catch (err) {
-      console.error("Error al eliminar:", err);
-    }
-  };
-
-  const handleTriggerCheck = async () => {
+  const handleManualCheck = async () => {
     setChecking(true);
     try {
-      await fetch(`${API_BASE_URL}/api/check`, { method: 'POST' });
-      setMessage({ type: 'success', text: 'Comprobación de novedades iniciada' });
-      setTimeout(fetchAlerts, 4000);
-    } catch (err) {
-      setMessage({ type: 'error', text: 'Error al comprobar las novedades' });
+      const res = await fetch(`${API_URL}/api/check?device_id=${encodeURIComponent(deviceId)}`, { method: 'POST' });
+      await res.json();
+      await loadPages();
+    } catch (e) {
+      alert("Error al comprobar: " + e.message);
     } finally {
       setChecking(false);
     }
   };
 
+  const handleAddSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch(`${API_URL}/api/pages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          device_id: deviceId,
+          name: form.name,
+          url: form.url,
+          notify_email: form.notify_email
+        })
+      });
+      const data = await res.json();
+      if (data.status === 'success') {
+        setShowModal(false);
+        setForm({ name: '', url: '', notify_email: form.notify_email });
+        loadPages();
+      } else {
+        alert("Error: " + (data.message || data.detail));
+      }
+    } catch (e) {
+      alert("Error de conexión");
+    }
+  };
+
+  const handleDismiss = async (id) => {
+    await fetch(`${API_URL}/api/pages/${id}/dismiss`, { method: 'POST' });
+    loadPages();
+  };
+
+  const handleDelete = async (id, name) => {
+    if (!window.confirm(`¿Dejar de monitorizar "${name}"?`)) return;
+    await fetch(`${API_URL}/api/pages/${id}`, { method: 'DELETE' });
+    loadPages();
+  };
+
+  const alteredPages = pages.filter(p => p.has_changed);
+  const displayedPages = filter === 'alerts' ? alteredPages : pages;
+
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 p-4 sm:p-8 font-sans">
-      <div className="max-w-4xl mx-auto">
-        
-        {/* Encabezado GsusAlert */}
-        <header className="flex items-center justify-between pb-6 mb-8 border-b border-slate-800">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-blue-600 rounded-xl shadow-lg shadow-blue-500/30">
-              <BellIcon />
+    <div style={{
+      display: 'flex',
+      minHeight: '100vh',
+      backgroundColor: '#000000',
+      color: '#ffffff',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Circular Spotify Text", Roboto, Helvetica, Arial, sans-serif'
+    }}>
+      
+      {/* BARRA LATERAL ESTILO SPOTIFY */}
+      <aside style={{
+        width: 250,
+        backgroundColor: '#121212',
+        borderRadius: 8,
+        margin: '8px 0 8px 8px',
+        padding: '24px 16px',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        flexShrink: 0
+      }}>
+        <div>
+          {/* Logo / Nombre */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 8px', marginBottom: 28 }}>
+            <div style={{
+              width: 32,
+              height: 32,
+              borderRadius: '50%',
+              backgroundColor: '#1ed760',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 900,
+              color: '#000'
+            }}>
+              ⚡
             </div>
-            <div>
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">
-                GsusAlert
-              </h1>
-              <p className="text-xs text-slate-400">Detector automático de nuevas publicaciones</p>
-            </div>
+            <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.5 }}>OposAlert</span>
           </div>
 
-          <button
-            onClick={handleTriggerCheck}
-            disabled={checking}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-all disabled:opacity-50"
-          >
-            <RefreshIcon spin={checking} />
-            <span>{checking ? 'Comprobando...' : 'Comprobar Ahora'}</span>
-          </button>
-        </header>
-
-        {/* Mensajes de aviso */}
-        {message && (
-          <div className={`p-4 mb-6 rounded-lg text-sm flex items-center justify-between ${
-            message.type === 'success' ? 'bg-emerald-950/50 border border-emerald-800 text-emerald-300' : 'bg-rose-950/50 border border-rose-800 text-rose-300'
-          }`}>
-            <span>{message.text}</span>
-            <button onClick={() => setMessage(null)} className="text-xs underline ml-4">Cerrar</button>
-          </div>
-        )}
-
-        {/* Formulario */}
-        <section className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6 mb-8">
-          <h2 className="text-lg font-semibold mb-4 text-slate-200">Añadir Nueva Monitorización</h2>
-          <form onSubmit={handleCreate} className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <input
-              type="text"
-              placeholder="Título (ej: Boletín Oficial)"
-              value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              required
-              className="bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 text-slate-100"
-            />
-            <input
-              type="url"
-              placeholder="URL de la página web"
-              value={formData.url}
-              onChange={(e) => setFormData({ ...formData, url: e.target.value })}
-              required
-              className="bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 text-slate-100"
-            />
-            <input
-              type="email"
-              placeholder="Tu correo electrónico"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              required
-              className="bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 text-slate-100"
-            />
+          {/* Menú principal */}
+          <nav style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <button
-              type="submit"
-              className="md:col-span-3 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-medium py-2.5 rounded-lg transition-colors shadow-lg shadow-blue-600/20"
+              onClick={() => setFilter('all')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 14,
+                padding: '10px 12px',
+                borderRadius: 6,
+                border: 'none',
+                backgroundColor: filter === 'all' ? '#282828' : 'transparent',
+                color: filter === 'all' ? '#ffffff' : '#b3b3b3',
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: 'pointer',
+                textAlign: 'left'
+              }}
             >
-              <span>Guardar Alerta</span>
+              <span>🏠</span> Inicio
             </button>
-          </form>
-        </section>
+            <button
+              onClick={() => setFilter('alerts')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 12px',
+                borderRadius: 6,
+                border: 'none',
+                backgroundColor: filter === 'alerts' ? '#282828' : 'transparent',
+                color: filter === 'alerts' ? '#ffffff' : '#b3b3b3',
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <span>🔔</span> Novedades
+              </div>
+              {alteredPages.length > 0 && (
+                <span style={{
+                  backgroundColor: '#e91429',
+                  color: '#fff',
+                  fontSize: 11,
+                  fontWeight: 800,
+                  borderRadius: 12,
+                  padding: '2px 8px'
+                }}>
+                  {alteredPages.length}
+                </span>
+              )}
+            </button>
+          </nav>
 
-        {/* Lista de Alertas */}
-        <section>
-          <h2 className="text-lg font-semibold mb-4 text-slate-200">Alertas Activas</h2>
-          {loading ? (
-            <div className="p-4 bg-slate-800/20 rounded-lg text-slate-400 text-sm flex items-center gap-3">
-              <RefreshIcon spin={true} />
-              <span>Conectando con el servidor en Render...</span>
+          {/* Sección biblioteca / añadir */}
+          <div style={{
+            marginTop: 24,
+            padding: 16,
+            backgroundColor: '#1f1f1f',
+            borderRadius: 8
+          }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Vigila una nueva web</div>
+            <div style={{ fontSize: 12, color: '#b3b3b3', marginBottom: 16 }}>
+              Introduce el enlace de una convocatoria o boletín para recibir avisos.
             </div>
-          ) : !Array.isArray(alerts) || alerts.length === 0 ? (
-            <p className="text-slate-500 text-sm italic">No hay alertas configuradas todavía.</p>
-          ) : (
-            <div className="grid gap-4">
-              {alerts.map((alert) => (
-                <div key={alert.id} className="bg-slate-800/30 border border-slate-700/40 rounded-xl p-5 flex items-center justify-between gap-4">
-                  <div className="space-y-1 overflow-hidden">
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-semibold text-slate-200 truncate">{alert.title}</h3>
-                      <span className={`px-2 py-0.5 text-xs rounded-full border ${
-                        alert.status === 'changed' ? 'bg-amber-950/60 border-amber-800 text-amber-300' :
-                        alert.status === 'error' ? 'bg-rose-950/60 border-rose-800 text-rose-300' :
-                        'bg-emerald-950/60 border-emerald-800 text-emerald-300'
-                      }`}>
-                        {alert.status === 'changed' ? '¡Novedad!' : alert.status === 'error' ? 'Error' : 'Activo'}
-                      </span>
-                    </div>
-                    <a href={alert.url} target="_blank" rel="noreferrer" className="text-xs text-blue-400 hover:underline flex items-center gap-1 truncate">
-                      <span className="truncate">{alert.url}</span>
-                      <ExternalIcon />
-                    </a>
-                  </div>
+            <button
+              onClick={() => setShowModal(true)}
+              style={{
+                backgroundColor: '#ffffff',
+                color: '#000000',
+                border: 'none',
+                padding: '8px 16px',
+                borderRadius: 20,
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: 'pointer'
+              }}
+            >
+              Crear alerta
+            </button>
+          </div>
+        </div>
 
-                  <button
-                    onClick={() => handleDelete(alert.id)}
-                    className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-lg transition-colors flex-shrink-0"
-                    title="Eliminar alerta"
+        {/* Info sesión al pie del sidebar */}
+        <div style={{ fontSize: 11, color: '#727272', padding: '0 8px' }}>
+          <div>Dispositivo:</div>
+          <div style={{ fontFamily: 'monospace', color: '#a7a7a7', marginTop: 2 }}>{deviceId}</div>
+        </div>
+      </aside>
+
+      {/* ÁREA DE CONTENIDO PRINCIPAL */}
+      <main style={{
+        flex: 1,
+        backgroundColor: '#121212',
+        borderRadius: 8,
+        margin: '8px 8px 8px 8px',
+        overflowY: 'auto',
+        display: 'flex',
+        flexDirection: 'column'
+      }}>
+        
+        {/* Cabecera superior translúcida */}
+        <div style={{
+          position: 'sticky',
+          top: 0,
+          backgroundColor: 'rgba(18, 18, 18, 0.85)',
+          backdropFilter: 'blur(10px)',
+          padding: '16px 32px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          zIndex: 10,
+          borderBottom: '1px solid rgba(255, 255, 255, 0.05)'
+        }}>
+          <div style={{ fontSize: 14, color: '#b3b3b3', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              backgroundColor: checking ? '#ffa42b' : '#1ed760',
+              display: 'inline-block'
+            }} />
+            {checking ? 'Rastreando cambios en segundo plano...' : 'Revisión periódica activa cada 15 min'}
+          </div>
+
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <button
+              onClick={handleManualCheck}
+              disabled={checking}
+              style={{
+                backgroundColor: '#ffffff',
+                color: '#000000',
+                border: 'none',
+                padding: '10px 20px',
+                borderRadius: 20,
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: checking ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {checking ? 'Comprobando...' : 'Comprobar ahora'}
+            </button>
+          </div>
+        </div>
+
+        {/* CUERPO: CUADRÍCULA DE CUADRADITOS / CARÁTULAS */}
+        <div style={{ padding: '24px 32px 64px' }}>
+          
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 20 }}>
+            <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0, letterSpacing: -0.5 }}>
+              {filter === 'alerts' ? 'Modificaciones detectadas' : 'Páginas en seguimiento'}
+            </h2>
+            <span style={{ fontSize: 13, color: '#b3b3b3', fontWeight: 600 }}>
+              {displayedPages.length} {displayedPages.length === 1 ? 'página' : 'páginas'}
+            </span>
+          </div>
+
+          {displayedPages.length === 0 ? (
+            <div style={{
+              backgroundColor: '#181818',
+              borderRadius: 8,
+              padding: '64px 32px',
+              textAlign: 'center',
+              color: '#b3b3b3'
+            }}>
+              <div style={{ fontSize: 48, marginBottom: 16 }}>📋</div>
+              <h3 style={{ color: '#fff', fontSize: 18, margin: '0 0 8px' }}>
+                {filter === 'alerts' ? 'No hay novedades recientes' : 'Tu lista de alertas está vacía'}
+              </h3>
+              <p style={{ fontSize: 14, maxWidth: 400, margin: '0 auto 20px' }}>
+                {filter === 'alerts'
+                  ? 'Todas las páginas vigiladas permanecen sin modificaciones desde la última lectura.'
+                  : 'Pulsa en "+ Crear alerta" en el panel lateral para empezar a monitorizar páginas.'}
+              </p>
+            </div>
+          ) : (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+              gap: 24
+            }}>
+              {displayedPages.map(page => {
+                // Captura en tiempo real del frontal de la web
+                const screenshotUrl = `https://s.wordpress.com/mshots/v1/${encodeURIComponent(page.url)}?w=600`;
+
+                return (
+                  <div
+                    key={page.id}
+                    style={{
+                      backgroundColor: '#181818',
+                      borderRadius: 8,
+                      padding: 16,
+                      position: 'relative',
+                      transition: 'background-color 0.2s ease, transform 0.2s ease',
+                      border: page.has_changed ? '2px solid #e91429' : '1px solid rgba(255,255,255,0.05)',
+                      display: 'flex',
+                      flexDirection: 'column'
+                    }}
                   >
-                    <TrashIcon />
-                  </button>
-                </div>
-              ))}
+                    {/* FOTO CUADRADA DEL INICIO DE LA WEB (ESTILO CARÁTULA) */}
+                    <div style={{
+                      position: 'relative',
+                      width: '100%',
+                      paddingTop: '100%', // Proporción 1:1 cuadrada
+                      borderRadius: 6,
+                      overflow: 'hidden',
+                      backgroundColor: '#282828',
+                      marginBottom: 16,
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.5)'
+                    }}>
+                      <img
+                        src={screenshotUrl}
+                        alt={page.name}
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover',
+                          objectPosition: 'top center'
+                        }}
+                        onError={(e) => {
+                          // Si falla la captura externa, muestra una carátula con fondo e inicial
+                          e.target.style.display = 'none';
+                        }}
+                      />
+
+                      {/* Etiqueta si hay cambio */}
+                      {page.has_changed && (
+                        <div style={{
+                          position: 'absolute',
+                          top: 8,
+                          left: 8,
+                          backgroundColor: '#e91429',
+                          color: '#fff',
+                          fontSize: 10,
+                          fontWeight: 800,
+                          textTransform: 'uppercase',
+                          padding: '3px 8px',
+                          borderRadius: 4,
+                          letterSpacing: 0.5
+                        }}>
+                          ¡Cambio!
+                        </div>
+                      )}
+
+                      {/* Botón flotante para visitar la web directo */}
+                      <a
+                        href={page.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Ir a la web"
+                        style={{
+                          position: 'absolute',
+                          bottom: 8,
+                          right: 8,
+                          width: 44,
+                          height: 44,
+                          borderRadius: '50%',
+                          backgroundColor: page.has_changed ? '#e91429' : '#1ed760',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#000',
+                          textDecoration: 'none',
+                          fontSize: 18,
+                          boxShadow: '0 8px 16px rgba(0,0,0,0.4)'
+                        }}
+                      >
+                        ↗
+                      </a>
+                    </div>
+
+                    {/* TÍTULO Y DETALLES */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <h3 style={{
+                        fontSize: 16,
+                        fontWeight: 700,
+                        margin: '0 0 6px',
+                        color: '#ffffff',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}>
+                        {page.name}
+                      </h3>
+                      
+                      <div style={{
+                        fontSize: 12,
+                        color: '#b3b3b3',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        marginBottom: 4
+                      }}>
+                        {page.url.replace(/^https?:\/\//, '')}
+                      </div>
+
+                      <div style={{ fontSize: 11, color: '#727272' }}>
+                        {page.last_checked}
+                      </div>
+                    </div>
+
+                    {/* ACCIONES AL PIE DEL CUADRADO */}
+                    <div style={{
+                      display: 'flex',
+                      gap: 8,
+                      marginTop: 14,
+                      paddingTop: 12,
+                      borderTop: '1px solid rgba(255,255,255,0.06)'
+                    }}>
+                      {page.has_changed && (
+                        <button
+                          onClick={() => handleDismiss(page.id)}
+                          style={{
+                            flex: 1,
+                            padding: '6px 0',
+                            backgroundColor: '#282828',
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: 4,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Visto
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDelete(page.id, page.name)}
+                        style={{
+                          padding: '6px 10px',
+                          backgroundColor: 'transparent',
+                          color: '#727272',
+                          border: 'none',
+                          borderRadius: 4,
+                          fontSize: 12,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Borrar
+                      </button>
+                    </div>
+
+                  </div>
+                );
+              })}
             </div>
           )}
-        </section>
+        </div>
+      </main>
 
-      </div>
+      {/* MODAL PARA AÑADIR NUEVA PÁGINA (TEMA OSCURO SPOTIFY) */}
+      {showModal && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 16,
+          zIndex: 100
+        }}>
+          <div style={{
+            backgroundColor: '#282828',
+            borderRadius: 12,
+            width: '100%',
+            maxWidth: 440,
+            padding: 32,
+            boxShadow: '0 20px 40px rgba(0,0,0,0.6)'
+          }}>
+            <h3 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 700, color: '#fff' }}>
+              Nueva alerta web
+            </h3>
+            <p style={{ margin: '0 0 24px', fontSize: 13, color: '#b3b3b3' }}>
+              Generará una carátula automática con la foto de la página y te avisará por correo ante cualquier modificación.
+            </p>
+
+            <form onSubmit={handleAddSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6, color: '#fff' }}>
+                  Nombre de la página
+                </label>
+                <input
+                  required
+                  type="text"
+                  value={form.name}
+                  onChange={e => setForm({ ...form, name: e.target.value })}
+                  placeholder="Ej. BOE Oposiciones"
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    fontSize: 14,
+                    backgroundColor: '#3e3e3e',
+                    border: '1px solid transparent',
+                    borderRadius: 6,
+                    color: '#fff',
+                    boxSizing: 'border-box',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6, color: '#fff' }}>
+                  Dirección URL
+                </label>
+                <input
+                  required
+                  type="url"
+                  value={form.url}
+                  onChange={e => setForm({ ...form, url: e.target.value })}
+                  placeholder="https://www.boe.es/..."
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    fontSize: 14,
+                    backgroundColor: '#3e3e3e',
+                    border: '1px solid transparent',
+                    borderRadius: 6,
+                    color: '#fff',
+                    boxSizing: 'border-box',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6, color: '#fff' }}>
+                  Correo electrónico para avisos
+                </label>
+                <input
+                  required
+                  type="email"
+                  value={form.notify_email}
+                  onChange={e => setForm({ ...form, notify_email: e.target.value })}
+                  placeholder="tu@email.com"
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    fontSize: 14,
+                    backgroundColor: '#3e3e3e',
+                    border: '1px solid transparent',
+                    borderRadius: 6,
+                    color: '#fff',
+                    boxSizing: 'border-box',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 12 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  style={{
+                    padding: '10px 18px',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#b3b3b3',
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  style={{
+                    padding: '10px 24px',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#000000',
+                    backgroundColor: '#1ed760',
+                    border: 'none',
+                    borderRadius: 20,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Guardar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
