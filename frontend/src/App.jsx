@@ -144,7 +144,6 @@ export default function App() {
 
   return (
     <>
-      {/* Reglas CSS de adaptación para pantallas pequeñas (móviles) */}
       <style>{`
         .app-container {
           display: flex;
@@ -201,7 +200,6 @@ export default function App() {
           gap: 24px;
         }
 
-        /* MEDIA QUERIES PARA MÓVILES (Menos de 768px de ancho) */
         @media (max-width: 768px) {
           .app-container {
             flex-direction: column;
@@ -269,10 +267,10 @@ export default function App() {
 
       <div className="app-container">
         
-        {/* BARRA LATERAL (SE ADAPTA EN MÓVIL) */}
+        {/* BARRA LATERAL / MENÚ SUPERIOR EN MÓVIL */}
         <aside className="sidebar">
           <div>
-            {/* Logo */}
+            {/* Logo Marca GsusAlert */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 8px', marginBottom: 20 }}>
               <div style={{
                 width: 32,
@@ -288,7 +286,7 @@ export default function App() {
               }}>
                 ⚡
               </div>
-              <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.5 }}>OposAlert</span>
+              <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.5 }}>GsusAlert</span>
             </div>
 
             {/* Navegación */}
@@ -634,7 +632,7 @@ export default function App() {
           </div>
         </main>
 
-        {/* MODAL RESPONSIVO */}
+        {/* MODAL CREAR ALERTA */}
         {showModal && (
           <div style={{
             position: 'fixed',

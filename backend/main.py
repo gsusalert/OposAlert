@@ -8,9 +8,9 @@ from pydantic import BaseModel
 import requests
 from bs4 import BeautifulSoup
 
-app = FastAPI(title="OposAlert Engine API")
+app = FastAPI(title="GsusAlert Engine API")
 
-# Habilitar CORS total para conectar sin trabas con React
+# Habilitar CORS total para conectar con el cliente React
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -19,7 +19,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Almacenamiento global de páginas en memoria
+# Base de datos global en memoria
 db_pages = []
 
 class PageCreate(BaseModel):
@@ -29,7 +29,7 @@ class PageCreate(BaseModel):
     notify_email: str
 
 def fetch_web_text(url: str) -> Optional[str]:
-    """Descarga y extrae solo el texto limpio de la web."""
+    """Obtiene el texto limpio extraído de la URL especificada."""
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         response = requests.get(url, headers=headers, timeout=10)
@@ -37,32 +37,30 @@ def fetch_web_text(url: str) -> Optional[str]:
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Eliminar etiquetas ruidosas
         for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'iframe', 'noscript']):
             tag.extract()
             
         text = soup.get_text(separator=' ')
         return re.sub(r'\s+', ' ', text).strip()
     except Exception as e:
-        print(f"Error scraping {url}: {e}")
+        print(f"Error extrayendo {url}: {e}")
         return None
 
 @app.get("/")
 def home():
-    return {"status": "ok", "message": "Backend OposAlert en línea"}
+    return {"status": "ok", "message": "Backend GsusAlert en línea"}
 
 @app.get("/api/pages")
 def get_pages(device_id: str = Query(...)):
-    """Obtiene únicamente las alertas del dispositivo que hace la consulta."""
+    """Retorna únicamente las páginas asignadas al identificador del dispositivo."""
     return [p for p in db_pages if p.get("device_id") == device_id]
 
 @app.post("/api/pages")
 def create_page(item: PageCreate):
-    """Guarda una nueva alerta asociada al device_id."""
+    """Crea una nueva alerta vinculada al device_id proporcionado."""
     if not item.name or not item.url or not item.notify_email:
-        raise HTTPException(status_code=400, detail="Faltan campos obligatorios")
+        raise HTTPException(status_code=400, detail="Todos los campos son obligatorios")
     
-    # Captura del texto base inicial
     initial_text = fetch_web_text(item.url) or ""
     
     new_page = {
@@ -81,7 +79,7 @@ def create_page(item: PageCreate):
 
 @app.post("/api/check")
 def check_pages(device_id: str = Query(...)):
-    """Revisa las páginas y solo marca alerta si se ha AÑADIDO texto nuevo (más de 30 caracteres)."""
+    """Rastrea e identifica únicamente si se ha incorporado contenido nuevo."""
     user_pages = [p for p in db_pages if p.get("device_id") == device_id]
     new_additions_count = 0
     
@@ -92,7 +90,7 @@ def check_pages(device_id: str = Query(...)):
             
         old_text = page.get("last_text", "")
         
-        # FILTRO DE ADICIÓN: Comprueba si el texto nuevo supera en 30 caracteres al anterior
+        # Evalúa si la longitud actual supera la anterior por más de 30 caracteres
         is_addition = len(old_text) > 0 and len(current_text) > (len(old_text) + 30)
         
         if is_addition:
@@ -109,16 +107,16 @@ def check_pages(device_id: str = Query(...)):
 
 @app.post("/api/pages/{page_id}/dismiss")
 def dismiss_page(page_id: str):
-    """Marca como vista la alerta."""
+    """Marca la novedad como revisada."""
     for page in db_pages:
         if page["id"] == page_id:
             page["has_changed"] = False
             return {"status": "success"}
-    raise HTTPException(status_code=404, detail="No encontrada")
+    raise HTTPException(status_code=404, detail="Alerta no encontrada")
 
 @app.delete("/api/pages/{page_id}")
 def delete_page(page_id: str):
-    """Elimina la alerta."""
+    """Elimina una alerta de la lista."""
     global db_pages
     db_pages = [p for p in db_pages if p["id"] != page_id]
     return {"status": "success"}
