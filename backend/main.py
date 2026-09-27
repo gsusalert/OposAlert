@@ -22,7 +22,6 @@ app.add_middleware(
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-# Si hay base de datos PostgreSQL en Render usaremos psycopg2 / sqlite3 local
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
@@ -70,19 +69,28 @@ def get_clean_text_and_hash(url: str):
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
-            'Cache-Control': 'no-cache'
+            'Cache-Control': 'no-cache, no-store, must-revalidate'
         }
-        response = requests.get(url, headers=headers, timeout=12)
+        response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
+        # Eliminar elementos que suelen meter cambios dinámicos
         for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'iframe', 
-                         'noscript', 'svg', 'form', 'input', 'meta', 'link']):
+                         'noscript', 'svg', 'form', 'input', 'meta', 'link', 'button']):
             tag.extract()
 
-        text = soup.get_text(separator=' ')
+        # Priorizar el contenido principal
+        main_content = soup.find('main') or soup.find('article') or soup.find('div', id=re.compile(r'content|main|pagina', re.I))
+        if main_content:
+            text = main_content.get_text(separator=' ')
+        else:
+            text = soup.get_text(separator=' ')
+
+        # Limpieza de texto
         clean_text = re.sub(r'\s+', ' ', text).strip().lower()
+        clean_text = re.sub(r'\b[a-f0-9]{32,64}\b', '', clean_text)
         clean_text = re.sub(r'\b\d{10,13}\b', '', clean_text)
 
         content_hash = hashlib.sha256(clean_text.encode('utf-8')).hexdigest()
@@ -168,7 +176,7 @@ def check_pages(device_id: str = Query(...)):
 
         if current_hash != prev_hash:
             old_len = prev_len or 0
-            if abs(new_len - old_len) > 15:
+            if abs(new_len - old_len) > 30:
                 has_changed = 1
                 new_additions_count += 1
             
