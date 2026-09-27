@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import json
 import hashlib
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, Query
@@ -20,8 +21,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Base de datos global en memoria
-db_pages = []
+# Ruta del archivo donde se guardarán las alertas de forma permanente
+DB_FILE = "pages.json"
+
+def load_pages_from_file() -> list:
+    """Carga la lista de páginas desde el archivo JSON si existe."""
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error leyendo {DB_FILE}: {e}")
+            return []
+    return []
+
+def save_pages_to_file(pages: list):
+    """Guarda la lista de páginas en el archivo JSON."""
+    try:
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            json.dump(pages, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Error guardando en {DB_FILE}: {e}")
+
+# Cargar base de datos inicial
+db_pages = load_pages_from_file()
 
 class PageCreate(BaseModel):
     device_id: str
@@ -45,23 +68,15 @@ def get_clean_text_and_hash(url: str):
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Eliminar elementos que suelen cambiar sin aportar contenido real
+        # Eliminar elementos dinámicos que causan falsos positivos
         for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'iframe', 
                          'noscript', 'svg', 'form', 'input', 'meta', 'link']):
             tag.extract()
 
-        # Extraer el texto
         text = soup.get_text(separator=' ')
-        
-        # Normalización estricta del texto:
-        # 1. Convertir a minúsculas
-        # 2. Reemplazar múltiples espacios/saltos por un solo espacio
         clean_text = re.sub(r'\s+', ' ', text).strip().lower()
-        
-        # Opcional: Eliminar patrones numéricos dinámicos muy cambiantes (ej. marcas de tiempo de Unix)
         clean_text = re.sub(r'\b\d{10,13}\b', '', clean_text)
 
-        # Generar hash SHA-256 único del contenido limpio
         content_hash = hashlib.sha256(clean_text.encode('utf-8')).hexdigest()
 
         return clean_text, content_hash
@@ -76,15 +91,18 @@ def home():
 @app.get("/api/pages")
 def get_pages(device_id: str = Query(...)):
     """Retorna únicamente las páginas asignadas al dispositivo."""
-    return [p for p in db_pages if p.get("device_id") == device_id]
+    current_pages = load_pages_from_file()
+    return [p for p in current_pages if p.get("device_id") == device_id]
 
 @app.post("/api/pages")
 def create_page(item: PageCreate):
-    """Crea una nueva alerta guardando el hash inicial del contenido."""
+    """Crea una nueva alerta y la guarda permanentemente."""
     if not item.name or not item.url or not item.notify_email:
         raise HTTPException(status_code=400, detail="Todos los campos son obligatorios")
     
     clean_text, content_hash = get_clean_text_and_hash(item.url)
+    
+    current_pages = load_pages_from_file()
     
     new_page = {
         "id": f"page_{int(time.time() * 1000)}",
@@ -98,61 +116,65 @@ def create_page(item: PageCreate):
         "last_checked": "Recién añadida"
     }
     
-    db_pages.append(new_page)
+    current_pages.append(new_page)
+    save_pages_to_file(current_pages)
+    
     return {"status": "success", "page": new_page}
 
 @app.post("/api/check")
 def check_pages(device_id: str = Query(...)):
     """Compara los hashes de contenido para evitar falsos positivos."""
-    user_pages = [p for p in db_pages if p.get("device_id") == device_id]
+    current_pages = load_pages_from_file()
     new_additions_count = 0
     
-    for page in user_pages:
+    for page in current_pages:
+        if page.get("device_id") != device_id:
+            continue
+
         clean_text, current_hash = get_clean_text_and_hash(page["url"])
         if not current_hash:
             continue
             
         previous_hash = page.get("last_hash", "")
         
-        # Si el hash guardado está vacío (p. ej. en la primera comprobación tras actualizar)
         if not previous_hash:
             page["last_hash"] = current_hash
             page["last_text_length"] = len(clean_text)
             continue
 
-        # Solo marcamos cambio si el HASH es diferente Y la longitud del texto ha variado significativamente
-        # (evita pequeños micro-cambios y asegura que hay texto nuevo agregado o modificado)
         if current_hash != previous_hash:
             old_len = page.get("last_text_length", 0)
             current_len = len(clean_text)
             
-            # Verificamos que realmente haya variación sustancial en el contenido del texto
             if abs(current_len - old_len) > 15:
                 page["has_changed"] = True
                 page["last_hash"] = current_hash
                 page["last_text_length"] = current_len
                 new_additions_count += 1
             else:
-                # Si el hash cambió por algún microdetalle pero el texto es casi idéntico, actualizamos silenciosamente
                 page["last_hash"] = current_hash
                 page["last_text_length"] = current_len
 
         page["last_checked"] = "Comprobado ahora"
         
+    save_pages_to_file(current_pages)
     return {"status": "success", "newAdditionsCount": new_additions_count}
 
 @app.post("/api/pages/{page_id}/dismiss")
 def dismiss_page(page_id: str):
     """Marca la novedad como vista."""
-    for page in db_pages:
+    current_pages = load_pages_from_file()
+    for page in current_pages:
         if page["id"] == page_id:
             page["has_changed"] = False
+            save_pages_to_file(current_pages)
             return {"status": "success"}
     raise HTTPException(status_code=404, detail="Alerta no encontrada")
 
 @app.delete("/api/pages/{page_id}")
 def delete_page(page_id: str):
-    """Elimina la alerta."""
-    global db_pages
-    db_pages = [p for p in db_pages if p["id"] != page_id]
+    """Elimina la alerta permanentemente."""
+    current_pages = load_pages_from_file()
+    updated_pages = [p for p in current_pages if p["id"] != page_id]
+    save_pages_to_file(updated_pages)
     return {"status": "success"}
