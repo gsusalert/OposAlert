@@ -69,29 +69,43 @@ def get_clean_text_and_hash(url: str):
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
-            'Cache-Control': 'no-cache, no-store, must-revalidate'
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
         }
         response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Eliminar elementos que suelen meter cambios dinámicos
+        # 1. Eliminar absolutamente todos los elementos no visibles y dinámicos
         for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'iframe', 
-                         'noscript', 'svg', 'form', 'input', 'meta', 'link', 'button']):
+                         'noscript', 'svg', 'form', 'input', 'meta', 'link', 'button',
+                         'aside', 'select', 'option']):
             tag.extract()
 
-        # Priorizar el contenido principal
-        main_content = soup.find('main') or soup.find('article') or soup.find('div', id=re.compile(r'content|main|pagina', re.I))
-        if main_content:
-            text = main_content.get_text(separator=' ')
+        # 2. Buscar específicamente las regiones de contenido real en portales Drupal/Gobierno
+        target_element = (
+            soup.find('div', class_=re.compile(r'field--name-body|region-content|content-area|main-content', re.I)) or
+            soup.find('main') or 
+            soup.find('article') or 
+            soup.find('div', id=re.compile(r'content|main|pagina', re.I))
+        )
+        
+        if target_element:
+            text = target_element.get_text(separator=' ')
         else:
             text = soup.get_text(separator=' ')
 
-        # Limpieza de texto
+        # 3. Limpieza profunda y normalización
         clean_text = re.sub(r'\s+', ' ', text).strip().lower()
-        clean_text = re.sub(r'\b[a-f0-9]{32,64}\b', '', clean_text)
-        clean_text = re.sub(r'\b\d{10,13}\b', '', clean_text)
+        
+        # Eliminar números de sesión, hashes alfanuméricos largos e IDs dinámicos
+        clean_text = re.sub(r'\b[a-f0-9]{24,64}\b', '', clean_text)
+        clean_text = re.sub(r'\b\d{9,13}\b', '', clean_text)
+        
+        # Si no hay texto extraído significativo, abortar para no guardar hash vacío
+        if len(clean_text) < 50:
+            return None, None
 
         content_hash = hashlib.sha256(clean_text.encode('utf-8')).hexdigest()
 
@@ -176,9 +190,10 @@ def check_pages(device_id: str = Query(...)):
 
         if current_hash != prev_hash:
             old_len = prev_len or 0
-            if abs(new_len - old_len) > 30:
-                has_changed = 1
-                new_additions_count += 1
+    # Exigir un cambio de al menos 60 caracteres de texto real visible
+        if abs(new_len - old_len) > 60:
+            has_changed = 1
+            new_additions_count += 1
             
             q_up = "UPDATE pages SET last_hash = %s, last_text_length = %s, has_changed = %s WHERE id = %s" if DATABASE_URL else "UPDATE pages SET last_hash = ?, last_text_length = ?, has_changed = ? WHERE id = ?"
             cursor.execute(q_up, (current_hash, new_len, has_changed, page_id))
