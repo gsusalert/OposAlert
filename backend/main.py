@@ -77,13 +77,13 @@ def get_clean_text_and_hash(url: str):
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 1. Eliminar absolutamente todos los elementos no visibles y dinámicos
+        # 1. Eliminar absolutamente todo lo que no sea contenido visible
         for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'iframe', 
                          'noscript', 'svg', 'form', 'input', 'meta', 'link', 'button',
-                         'aside', 'select', 'option']):
+                         'aside', 'select', 'option', 'ul', 'ol']):
             tag.extract()
 
-        # 2. Buscar específicamente las regiones de contenido real en portales Drupal/Gobierno
+        # 2. Buscar únicamente el cuerpo del artículo principal
         target_element = (
             soup.find('div', class_=re.compile(r'field--name-body|region-content|content-area|main-content', re.I)) or
             soup.find('main') or 
@@ -91,25 +91,22 @@ def get_clean_text_and_hash(url: str):
             soup.find('div', id=re.compile(r'content|main|pagina', re.I))
         )
         
-        if target_element:
-            text = target_element.get_text(separator=' ')
-        else:
-            text = soup.get_text(separator=' ')
+        text = target_element.get_text(separator=' ') if target_element else soup.get_text(separator=' ')
 
-        # 3. Limpieza profunda y normalización
-        clean_text = re.sub(r'\s+', ' ', text).strip().lower()
+        # 3. Extraer solo palabras de más de 2 letras y descartar números/tokens
+        words = re.findall(r'\b[a-zA-záéíóúÁÉÍÓÚñÑ]{3,}\b', text.lower())
         
-        # Eliminar números de sesión, hashes alfanuméricos largos e IDs dinámicos
-        clean_text = re.sub(r'\b[a-f0-9]{24,64}\b', '', clean_text)
-        clean_text = re.sub(r'\b\d{9,13}\b', '', clean_text)
+        # 4. Ordenar las palabras alfabéticamente para neutralizar cambios de orden del servidor
+        sorted_words = sorted(words)
+        normalized_text = ' '.join(sorted_words)
         
-        # Si no hay texto extraído significativo, abortar para no guardar hash vacío
-        if len(clean_text) < 50:
+        if len(normalized_text) < 30:
             return None, None
 
-        content_hash = hashlib.sha256(clean_text.encode('utf-8')).hexdigest()
+        # Generar hash SHA-256 de las palabras ordenadas
+        content_hash = hashlib.sha256(normalized_text.encode('utf-8')).hexdigest()
 
-        return clean_text, content_hash
+        return normalized_text, content_hash
     except Exception as e:
         print(f"Error extrayendo {url}: {e}")
         return None, None
@@ -190,10 +187,10 @@ def check_pages(device_id: str = Query(...)):
 
         if current_hash != prev_hash:
             old_len = prev_len or 0
-    # Exigir un cambio de al menos 60 caracteres de texto real visible
-        if abs(new_len - old_len) > 60:
-            has_changed = 1
-            new_additions_count += 1
+            # SOLO AVISAR SI HAY CONTENIDO NUEVO AÑADIDO (El texto aumenta en más de 40 letras reales)
+            if (new_len - old_len) > 40:
+                has_changed = 1
+                new_additions_count += 1
             
             q_up = "UPDATE pages SET last_hash = %s, last_text_length = %s, has_changed = %s WHERE id = %s" if DATABASE_URL else "UPDATE pages SET last_hash = ?, last_text_length = ?, has_changed = ? WHERE id = ?"
             cursor.execute(q_up, (current_hash, new_len, has_changed, page_id))
