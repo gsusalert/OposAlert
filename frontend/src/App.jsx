@@ -14,13 +14,15 @@ function getCookie(name) {
 }
 
 function getOrCreateDeviceId() {
+  const KEY = "gsusalert_device_id_v2";
   let id = null;
+
   try {
-    id = localStorage.getItem("opos_device_id");
+    id = localStorage.getItem(KEY);
   } catch (e) {}
 
   if (!id) {
-    id = getCookie("opos_device_id");
+    id = getCookie(KEY);
   }
 
   if (!id) {
@@ -28,9 +30,9 @@ function getOrCreateDeviceId() {
   }
 
   try {
-    localStorage.setItem("opos_device_id", id);
+    localStorage.setItem(KEY, id);
   } catch (e) {}
-  setCookie("opos_device_id", id, 365);
+  setCookie(KEY, id, 365);
 
   return id;
 }
