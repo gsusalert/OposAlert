@@ -4,8 +4,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import create_engine, Column, Integer, String, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker
-import requests
-from bs4 import BeautifulSoup
 
 # 1. Obtener la URL de conexión desde la variable de entorno
 DATABASE_URL = os.getenv("DATABASE_URL")

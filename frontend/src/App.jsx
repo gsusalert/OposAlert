@@ -14,7 +14,7 @@ function getCookie(name) {
 }
 
 function getOrCreateDeviceId() {
-  const KEY = "gsusalert_device_id_v2";
+  const KEY = "gsusalert_device_id_stable";
   let id = null;
 
   try {
@@ -283,10 +283,10 @@ export default function App() {
 
       <div className="app-container">
         
-        {/* BARRA LATERAL CON EL NUEVO LOGO NEÓN */}
+        {/* BARRA LATERAL */}
         <aside className="sidebar">
           <div>
-            {/* LOGO CAMPANA + TEXTO GSUSALERT EN NEÓN VERDE */}
+            {/* LOGO */}
             <div style={{
               display: 'flex',
               flexDirection: 'column',
@@ -295,7 +295,6 @@ export default function App() {
               padding: '8px 0 20px',
               gap: 10
             }}>
-              {/* Esfera Neón Campana */}
               <div 
                 className="neon-bell-box"
                 style={{
@@ -317,7 +316,6 @@ export default function App() {
                 </span>
               </div>
 
-              {/* Nombre Neón */}
               <span style={{
                 fontSize: 17,
                 fontWeight: 900,
@@ -330,7 +328,7 @@ export default function App() {
               </span>
             </div>
 
-            {/* Navegación */}
+            {/* NAVEGACIÓN */}
             <nav style={{ display: 'flex', flexDirection: 'row', gap: 8 }}>
               <button
                 onClick={() => setFilter('all')}
@@ -387,7 +385,7 @@ export default function App() {
               </button>
             </nav>
 
-            {/* Bloque Crear Alerta */}
+            {/* BLOQUE CREAR ALERTA */}
             <div className="sidebar-box" style={{
               marginTop: 20,
               padding: 16,
@@ -422,16 +420,15 @@ export default function App() {
             </div>
           </div>
 
-          {/* Info Dispositivo */}
+          {/* INFO DISPOSITIVO */}
           <div className="sidebar-info" style={{ fontSize: 11, color: '#727272', padding: '0 8px', marginTop: 16 }}>
             <div>Dispositivo:</div>
             <div style={{ fontFamily: 'monospace', color: '#a7a7a7', marginTop: 2, wordBreak: 'break-all' }}>{deviceId}</div>
           </div>
         </aside>
 
-        {/* ÁREA DE CONTENIDO PRINCIPAL */}
+        {/* CONTENIDO PRINCIPAL */}
         <main className="main-content">
-          
           <div className="header-bar">
             <div className="header-status" style={{ fontSize: 13, color: '#b3b3b3', display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{
