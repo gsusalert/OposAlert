@@ -17,22 +17,37 @@ function getOrCreateDeviceId() {
   const KEY = "gsusalert_device_id_stable";
   let id = null;
 
-  try {
-    id = localStorage.getItem(KEY);
-  } catch (e) {}
+  // 1. Prioridad: Si ya hay un ID en el hash de la URL (#dev_xxx), usarlo
+  if (window.location.hash && window.location.hash.startsWith('#dev_')) {
+    id = window.location.hash.replace('#', '');
+  }
 
+  // 2. Si no hay Hash, intentar recuperar de localStorage
+  if (!id) {
+    try {
+      id = localStorage.getItem(KEY);
+    } catch (e) {}
+  }
+
+  // 3. Intentar recuperar de las cookies
   if (!id) {
     id = getCookie(KEY);
   }
 
+  // 4. Si no existe en ningún sitio, generar un ID totalmente nuevo para este dispositivo
   if (!id) {
     id = 'dev_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
   }
 
+  // 5. Guardar en almacenamiento local, cookie y fijar en el hash de la URL
   try {
     localStorage.setItem(KEY, id);
   } catch (e) {}
   setCookie(KEY, id, 365);
+
+  if (window.location.hash !== `#${id}`) {
+    window.history.replaceState(null, '', `#${id}`);
+  }
 
   return id;
 }
