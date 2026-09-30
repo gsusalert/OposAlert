@@ -45,7 +45,6 @@ Base.metadata.create_all(bind=engine)
 
 # 2. Función para enviar correo al destinatario guardado en la alarma
 def send_email_notification(to_email: str, page_name: str, page_url: str):
-    # Si la alarma no tiene email asignado o no están configuradas las credenciales SMTP
     if not to_email or not EMAIL_USER or not EMAIL_PASS:
         print(f"[Aviso Email] Omitiendo envío: No hay email de destino o faltan credenciales SMTP.")
         return
@@ -53,7 +52,7 @@ def send_email_notification(to_email: str, page_name: str, page_url: str):
     try:
         msg = MIMEMultipart()
         msg['From'] = f"GsusAlert <{EMAIL_USER}>"
-        msg['To'] = to_email  # Correo específico configurado en esta alerta
+        msg['To'] = to_email  # Correo específico asignado a la alarma
         msg['Subject'] = f"🔔 Novedad detectada: {page_name}"
 
         body = f"""
@@ -76,24 +75,33 @@ def send_email_notification(to_email: str, page_name: str, page_url: str):
     except Exception as e:
         print(f"[Error Email] No se pudo enviar el correo a {to_email}: {e}")
 
-# 3. Extracción de texto
+# 3. Extracción de texto mejorada para Forocoches y webs protegidas
 def fetch_page_text(url: str) -> str:
     clean_url = url.split('#')[0]
 
     scraper = cloudscraper.create_scraper(
         delay=10,
-        browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
+        browser={
+            'browser': 'chrome',
+            'platform': 'windows',
+            'desktop': True
+        }
     )
 
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
         'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
-        'Cache-Control': 'no-cache'
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+        'Referer': 'https://forocoches.com/'
     }
 
     try:
         response = scraper.get(clean_url, headers=headers, timeout=20)
-        if response.status_code != 200 or "Just a moment..." in response.text:
+        
+        if response.status_code != 200 or "Just a moment..." in response.text or "Challenge" in response.text:
+            print(f"[Aviso Scraping] Estado {response.status_code} o Cloudflare en {clean_url}")
             return ""
 
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -101,17 +109,18 @@ def fetch_page_text(url: str) -> str:
         if "forocoches.com" in clean_url:
             posts = soup.find_all('div', id=re.compile(r'^post_message_'))
             if posts:
-                return " ".join([p.get_text(strip=True) for p in posts])
+                all_text = " ".join([p.get_text(strip=True) for p in posts])
+                return all_text
 
         for element in soup(["script", "style", "noscript", "header", "footer", "nav"]):
             element.decompose()
 
         return soup.get_text(separator=' ', strip=True)
     except Exception as e:
-        print(f"Excepción raspando {clean_url}: {e}")
+        print(f"Excepción al raspar {clean_url}: {e}")
         return ""
 
-# 4. Tarea Automática (Revisa cada 30 min todas las alarmas de la base de datos)
+# 4. Tarea Automática (Revisa cada 30 min todas las alarmas)
 def job_check_all_pages():
     print("[Cron Job] Ejecutando revisión programada cada 30 minutos...")
     db = SessionLocal()
@@ -135,7 +144,6 @@ def job_check_all_pages():
 
             print(f"[Cambio detectado] {page.name} ({page.url})")
             
-            # Envía al email que asignó el usuario a esta alarma concreta
             if page.notify_email:
                 send_email_notification(page.notify_email, page.name, page.url)
 
@@ -220,7 +228,6 @@ def check_pages(device_id: str):
             new_additions_count += 1
             db.commit()
 
-            # Envía el correo al destinatario asociado a esta alarma
             if page.notify_email:
                 send_email_notification(page.notify_email, page.name, page.url)
 
