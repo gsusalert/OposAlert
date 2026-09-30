@@ -17,8 +17,8 @@ from contextlib import asynccontextmanager
 
 # 1. Variables de Entorno de Render
 DATABASE_URL = os.getenv("DATABASE_URL")
-EMAIL_USER = os.getenv("EMAIL_USER")  # Tu correo de Gmail (servidor emisor)
-EMAIL_PASS = os.getenv("EMAIL_PASS")  # Tu contraseña de aplicación de Gmail
+EMAIL_USER = os.getenv("EMAIL_USER")  # Correo de Gmail (remitente)
+EMAIL_PASS = os.getenv("EMAIL_PASS")  # Contraseña de aplicación de Gmail
 
 if not DATABASE_URL:
     raise ValueError("ERROR: La variable DATABASE_URL no está configurada.")
@@ -43,16 +43,16 @@ class PageModel(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# 2. Función para enviar correo al destinatario guardado en la alarma
+# 2. Función para enviar correo al destinatario específico de la alarma
 def send_email_notification(to_email: str, page_name: str, page_url: str):
     if not to_email or not EMAIL_USER or not EMAIL_PASS:
-        print(f"[Aviso Email] Omitiendo envío: No hay email de destino o faltan credenciales SMTP.")
+        print("[Aviso Email] Omitiendo envío: No hay email de destino o faltan credenciales SMTP.")
         return
 
     try:
         msg = MIMEMultipart()
         msg['From'] = f"GsusAlert <{EMAIL_USER}>"
-        msg['To'] = to_email  # Correo específico asignado a la alarma
+        msg['To'] = to_email
         msg['Subject'] = f"🔔 Novedad detectada: {page_name}"
 
         body = f"""
@@ -75,9 +75,16 @@ def send_email_notification(to_email: str, page_name: str, page_url: str):
     except Exception as e:
         print(f"[Error Email] No se pudo enviar el correo a {to_email}: {e}")
 
-# 3. Extracción de texto mejorada para Forocoches y webs protegidas
+# 3. Extracción de texto optimizada para Forocoches y detección de páginas nuevas
 def fetch_page_text(url: str) -> str:
     clean_url = url.split('#')[0]
+
+    # Forzar la consulta a la última versión/página en Forocoches
+    if "forocoches.com" in clean_url and "showthread.php" in clean_url:
+        if "goto=newpost" not in clean_url and "page=" in clean_url:
+            clean_url = re.sub(r'page=\d+', 'goto=newpost', clean_url)
+        elif "goto=newpost" not in clean_url:
+            clean_url += "&goto=newpost"
 
     scraper = cloudscraper.create_scraper(
         delay=10,
@@ -109,7 +116,7 @@ def fetch_page_text(url: str) -> str:
         if "forocoches.com" in clean_url:
             posts = soup.find_all('div', id=re.compile(r'^post_message_'))
             if posts:
-                all_text = " ".join([p.get_text(strip=True) for p in posts])
+                all_text = f"TOTAL_POSTS_{len(posts)} " + " ".join([p.get_text(strip=True) for p in posts])
                 return all_text
 
         for element in soup(["script", "style", "noscript", "header", "footer", "nav"]):
