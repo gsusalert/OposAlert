@@ -75,11 +75,11 @@ def send_email_notification(to_email: str, page_name: str, page_url: str):
     except Exception as e:
         print(f"[Error Email] No se pudo enviar el correo a {to_email}: {e}")
 
-# 3. Extracción de texto optimizada para Forocoches y detección de páginas nuevas
+# 3. Extracción de texto optimizada y robusta para Forocoches
 def fetch_page_text(url: str) -> str:
     clean_url = url.split('#')[0]
 
-    # Forzar la consulta a la última versión/página en Forocoches
+    # Para Forocoches, aseguramos que visite la versión de último mensaje
     if "forocoches.com" in clean_url and "showthread.php" in clean_url:
         if "goto=newpost" not in clean_url and "page=" in clean_url:
             clean_url = re.sub(r'page=\d+', 'goto=newpost', clean_url)
@@ -87,7 +87,7 @@ def fetch_page_text(url: str) -> str:
             clean_url += "&goto=newpost"
 
     scraper = cloudscraper.create_scraper(
-        delay=10,
+        delay=5,
         browser={
             'browser': 'chrome',
             'platform': 'windows',
@@ -96,35 +96,38 @@ def fetch_page_text(url: str) -> str:
     )
 
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
         'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
         'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache',
         'Referer': 'https://forocoches.com/'
     }
 
     try:
         response = scraper.get(clean_url, headers=headers, timeout=20)
         
+        # Si Cloudflare o Forocoches bloquea la respuesta
         if response.status_code != 200 or "Just a moment..." in response.text or "Challenge" in response.text:
-            print(f"[Aviso Scraping] Estado {response.status_code} o Cloudflare en {clean_url}")
+            print(f"[Aviso Scraping] Estado {response.status_code} o bloqueo de Cloudflare en: {clean_url}")
             return ""
 
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        if "forocoches.com" in clean_url:
-            posts = soup.find_all('div', id=re.compile(r'^post_message_'))
-            if posts:
-                all_text = f"TOTAL_POSTS_{len(posts)} " + " ".join([p.get_text(strip=True) for p in posts])
-                return all_text
-
-        for element in soup(["script", "style", "noscript", "header", "footer", "nav"]):
+        # Eliminar elementos no relevantes (scripts, estilos, navegación)
+        for element in soup(["script", "style", "noscript", "iframe", "header", "footer"]):
             element.decompose()
 
-        return soup.get_text(separator=' ', strip=True)
+        # Extraer todo el texto limpio visible en la página
+        text_content = soup.get_text(separator=' ', strip=True)
+        
+        # Reducir espacios múltiples
+        cleaned_text = re.sub(r'\s+', ' ', text_content)
+
+        print(f"[Scraping Exitoso] Longitud del texto extraído: {len(cleaned_text)} caracteres en {clean_url}")
+        return cleaned_text
+
     except Exception as e:
-        print(f"Excepción al raspar {clean_url}: {e}")
+        print(f"[Error Scraping] Excepción al raspar {clean_url}: {e}")
         return ""
 
 # 4. Tarea Automática (Revisa cada 30 min todas las alarmas)
