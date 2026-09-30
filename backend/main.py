@@ -15,10 +15,10 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from apscheduler.schedulers.background import BackgroundScheduler
 from contextlib import asynccontextmanager
 
-# 1. Variables de Entorno (Adaptadas a tus nombres en Render)
+# 1. Variables de Entorno de Render
 DATABASE_URL = os.getenv("DATABASE_URL")
-EMAIL_USER = os.getenv("EMAIL_USER")
-EMAIL_PASS = os.getenv("EMAIL_PASS")
+EMAIL_USER = os.getenv("EMAIL_USER")  # Tu correo de Gmail (servidor emisor)
+EMAIL_PASS = os.getenv("EMAIL_PASS")  # Tu contraseña de aplicación de Gmail
 
 if not DATABASE_URL:
     raise ValueError("ERROR: La variable DATABASE_URL no está configurada.")
@@ -43,27 +43,28 @@ class PageModel(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# 2. Función para enviar correo de notificación usando tu Gmail
+# 2. Función para enviar correo al destinatario guardado en la alarma
 def send_email_notification(to_email: str, page_name: str, page_url: str):
-    if not EMAIL_USER or not EMAIL_PASS or not to_email:
-        print("[Aviso Email] Credenciales EMAIL_USER/EMAIL_PASS no disponibles o correo destino vacío.")
+    # Si la alarma no tiene email asignado o no están configuradas las credenciales SMTP
+    if not to_email or not EMAIL_USER or not EMAIL_PASS:
+        print(f"[Aviso Email] Omitiendo envío: No hay email de destino o faltan credenciales SMTP.")
         return
 
     try:
         msg = MIMEMultipart()
-        msg['From'] = EMAIL_USER
-        msg['To'] = to_email
+        msg['From'] = f"GsusAlert <{EMAIL_USER}>"
+        msg['To'] = to_email  # Correo específico configurado en esta alerta
         msg['Subject'] = f"🔔 Novedad detectada: {page_name}"
 
         body = f"""
         Hola,
 
-        Se ha detectado nuevo contenido o respuestas en la página monitorizada:
+        Se ha detectado nuevo contenido o respuestas en la página que monitorizas:
 
         📌 Nombre: {page_name}
         🔗 Enlace: {page_url}
 
-        Abre tu aplicación para revisar los cambios.
+        Abre la aplicación para consultar los cambios.
         """
         msg.attach(MIMEText(body, 'plain'))
 
@@ -75,7 +76,7 @@ def send_email_notification(to_email: str, page_name: str, page_url: str):
     except Exception as e:
         print(f"[Error Email] No se pudo enviar el correo a {to_email}: {e}")
 
-# 3. Scraping / Extracción de texto
+# 3. Extracción de texto
 def fetch_page_text(url: str) -> str:
     clean_url = url.split('#')[0]
 
@@ -110,9 +111,9 @@ def fetch_page_text(url: str) -> str:
         print(f"Excepción raspando {clean_url}: {e}")
         return ""
 
-# 4. Tarea Automática de Chequeo (Cada 30 minutos)
+# 4. Tarea Automática (Revisa cada 30 min todas las alarmas de la base de datos)
 def job_check_all_pages():
-    print("[Cron Job] Revisando todas las páginas automáticamente...")
+    print("[Cron Job] Ejecutando revisión programada cada 30 minutos...")
     db = SessionLocal()
     pages = db.query(PageModel).all()
 
@@ -134,11 +135,12 @@ def job_check_all_pages():
 
             print(f"[Cambio detectado] {page.name} ({page.url})")
             
+            # Envía al email que asignó el usuario a esta alarma concreta
             if page.notify_email:
                 send_email_notification(page.notify_email, page.name, page.url)
 
     db.close()
-    print("[Cron Job] Revisión finalizada.")
+    print("[Cron Job] Revisión completada.")
 
 # 5. Configurar Scheduler
 scheduler = BackgroundScheduler()
@@ -147,7 +149,7 @@ scheduler = BackgroundScheduler()
 async def lifespan(app: FastAPI):
     scheduler.add_job(job_check_all_pages, 'interval', minutes=30)
     scheduler.start()
-    print("[Scheduler] Cron activado correctamente cada 30 minutos.")
+    print("[Scheduler] Programador automático de 30 minutos iniciado.")
     yield
     scheduler.shutdown()
 
@@ -218,6 +220,7 @@ def check_pages(device_id: str):
             new_additions_count += 1
             db.commit()
 
+            # Envía el correo al destinatario asociado a esta alarma
             if page.notify_email:
                 send_email_notification(page.notify_email, page.name, page.url)
 
