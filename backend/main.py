@@ -1,5 +1,9 @@
 import os
 import re
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
 import cloudscraper
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException
@@ -8,8 +12,13 @@ from pydantic import BaseModel
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, Text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-# 1. Obtener la URL de conexión desde la variable de entorno
+from apscheduler.schedulers.background import BackgroundScheduler
+from contextlib import asynccontextmanager
+
+# 1. Variables de Entorno y Configuración de BD
 DATABASE_URL = os.getenv("DATABASE_URL")
+SMTP_EMAIL = os.getenv("SMTP_EMAIL")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 
 if not DATABASE_URL:
     raise ValueError("ERROR: La variable DATABASE_URL no está configurada.")
@@ -34,61 +43,119 @@ class PageModel(Base):
 
 Base.metadata.create_all(bind=engine)
 
-def normalize_url(url: str) -> str:
-    """Limpia la URL quitando anclas #post... y añade parámetros para evitar cachés"""
-    clean_url = url.split('#')[0]
-    return clean_url
+# 2. Función para enviar correo electrónico de notificación
+def send_email_notification(to_email: str, page_name: str, page_url: str):
+    if not SMTP_EMAIL or not SMTP_PASSWORD or not to_email:
+        print("[Aviso Email] Datos SMTP no configurados o email de destino vacío.")
+        return
 
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = SMTP_EMAIL
+        msg['To'] = to_email
+        msg['Subject'] = f"🔔 Novedad detectada: {page_name}"
+
+        body = f"""
+        Hola,
+
+        Se ha detectado nuevo contenido o respuestas en la página monitorizada:
+
+        📌 Nombre: {page_name}
+        🔗 Enlace: {page_url}
+
+        Abre tu aplicación para revisar los cambios.
+        """
+        msg.attach(MIMEText(body, 'plain'))
+
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+        server.login(SMTP_EMAIL, SMTP_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        print(f"[Email enviado] Notificación enviada exitosamente a {to_email}")
+    except Exception as e:
+        print(f"[Error Email] No se pudo enviar el correo a {to_email}: {e}")
+
+# 3. Scraping / Extracción de texto
 def fetch_page_text(url: str) -> str:
-    clean_url = normalize_url(url)
+    clean_url = url.split('#')[0]
 
-    # Configurar scraper imitando un navegador de escritorio completo
     scraper = cloudscraper.create_scraper(
         delay=10,
-        browser={
-            'browser': 'chrome',
-            'platform': 'windows',
-            'mobile': False
-        }
+        browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
     )
 
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
         'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
-        'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache',
-        'Referer': 'https://www.google.com/'
+        'Cache-Control': 'no-cache'
     }
 
     try:
         response = scraper.get(clean_url, headers=headers, timeout=20)
-        
-        # Verificar si Cloudflare bloqueó la petición
-        if response.status_code != 200 or "Just a moment..." in response.text or "Attention Required" in response.text:
-            print(f"[Aviso] Cloudflare o error {response.status_code} en {clean_url}")
+        if response.status_code != 200 or "Just a moment..." in response.text:
             return ""
 
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Si es un hilo de Forocoches, extraemos específicamente los posts
         if "forocoches.com" in clean_url:
             posts = soup.find_all('div', id=re.compile(r'^post_message_'))
             if posts:
-                # Unimos el texto de todos los comentarios del hilo
                 return " ".join([p.get_text(strip=True) for p in posts])
 
-        # Para el resto de webs genericas, extraemos todo el texto limpio
         for element in soup(["script", "style", "noscript", "header", "footer", "nav"]):
             element.decompose()
 
         return soup.get_text(separator=' ', strip=True)
-
     except Exception as e:
-        print(f"Excepción al raspar {clean_url}: {e}")
+        print(f"Excepción raspando {clean_url}: {e}")
         return ""
 
-app = FastAPI()
+# 4. Tarea Automática de Chequeo (Se ejecuta cada 30 min)
+def job_check_all_pages():
+    print("[Cron Job] Iniciando revisión automática de todas las páginas...")
+    db = SessionLocal()
+    pages = db.query(PageModel).all()
+
+    for page in pages:
+        current_content = fetch_page_text(page.url)
+
+        if not current_content:
+            continue
+
+        if not page.last_content:
+            page.last_content = current_content
+            db.commit()
+            continue
+
+        # Si el contenido ha cambiado
+        if current_content != page.last_content:
+            page.has_changed = True
+            page.last_content = current_content
+            db.commit()
+
+            print(f"[Cambio detectado] {page.name} ({page.url})")
+            
+            # Enviar correo si el usuario introdujo un email
+            if page.notify_email:
+                send_email_notification(page.notify_email, page.name, page.url)
+
+    db.close()
+    print("[Cron Job] Revisión finalizada.")
+
+# 5. Inicialización de App y Scheduler
+scheduler = BackgroundScheduler()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Iniciar el programador de tareas al arrancar el servidor
+    scheduler.add_job(job_check_all_pages, 'interval', minutes=30)
+    scheduler.start()
+    print("[Scheduler] Programador automático iniciado (cada 30 minutos).")
+    yield
+    # Apagar el programador al detener el servidor
+    scheduler.shutdown()
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -104,6 +171,8 @@ class PageCreate(BaseModel):
     url: str
     notify_email: str
 
+# ----------------- ENDPOINTS -----------------
+
 @app.get("/api/pages")
 def get_pages(device_id: str):
     db = SessionLocal()
@@ -114,7 +183,6 @@ def get_pages(device_id: str):
 @app.post("/api/pages")
 def create_page(page: PageCreate):
     db = SessionLocal()
-    
     initial_content = fetch_page_text(page.url)
 
     new_page = PageModel(
@@ -133,37 +201,33 @@ def create_page(page: PageCreate):
 
 @app.post("/api/check")
 def check_pages(device_id: str):
+    """Permite al usuario comprobar manualmente sus páginas desde la app"""
     db = SessionLocal()
     pages = db.query(PageModel).filter(PageModel.device_id == device_id).all()
-    
     new_additions_count = 0
 
     for page in pages:
         current_content = fetch_page_text(page.url)
 
-        # Si la petición falló o devolvió vacío (ej. bloqueo de Cloudflare), no comparamos
         if not current_content:
             continue
 
-        # Si no había contenido guardado previo, guardamos el actual
         if not page.last_content:
             page.last_content = current_content
             db.commit()
             continue
 
-        # Comparación: Si el contenido raspado cambia respecto al anterior
         if current_content != page.last_content:
             page.has_changed = True
             page.last_content = current_content
             new_additions_count += 1
+            db.commit()
 
-    db.commit()
+            if page.notify_email:
+                send_email_notification(page.notify_email, page.name, page.url)
+
     db.close()
-
-    return {
-        "status": "success",
-        "newAdditionsCount": new_additions_count
-    }
+    return {"status": "success", "newAdditionsCount": new_additions_count}
 
 @app.post("/api/pages/{page_id}/dismiss")
 def dismiss_page(page_id: int):
