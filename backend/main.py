@@ -15,10 +15,10 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from apscheduler.schedulers.background import BackgroundScheduler
 from contextlib import asynccontextmanager
 
-# 1. Variables de Entorno y Configuración de BD
+# 1. Variables de Entorno (Adaptadas a tus nombres en Render)
 DATABASE_URL = os.getenv("DATABASE_URL")
-SMTP_EMAIL = os.getenv("SMTP_EMAIL")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+EMAIL_USER = os.getenv("EMAIL_USER")
+EMAIL_PASS = os.getenv("EMAIL_PASS")
 
 if not DATABASE_URL:
     raise ValueError("ERROR: La variable DATABASE_URL no está configurada.")
@@ -43,15 +43,15 @@ class PageModel(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# 2. Función para enviar correo electrónico de notificación
+# 2. Función para enviar correo de notificación usando tu Gmail
 def send_email_notification(to_email: str, page_name: str, page_url: str):
-    if not SMTP_EMAIL or not SMTP_PASSWORD or not to_email:
-        print("[Aviso Email] Datos SMTP no configurados o email de destino vacío.")
+    if not EMAIL_USER or not EMAIL_PASS or not to_email:
+        print("[Aviso Email] Credenciales EMAIL_USER/EMAIL_PASS no disponibles o correo destino vacío.")
         return
 
     try:
         msg = MIMEMultipart()
-        msg['From'] = SMTP_EMAIL
+        msg['From'] = EMAIL_USER
         msg['To'] = to_email
         msg['Subject'] = f"🔔 Novedad detectada: {page_name}"
 
@@ -68,10 +68,10 @@ def send_email_notification(to_email: str, page_name: str, page_url: str):
         msg.attach(MIMEText(body, 'plain'))
 
         server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
-        server.login(SMTP_EMAIL, SMTP_PASSWORD)
+        server.login(EMAIL_USER, EMAIL_PASS)
         server.send_message(msg)
         server.quit()
-        print(f"[Email enviado] Notificación enviada exitosamente a {to_email}")
+        print(f"[Email enviado] Notificación enviada con éxito a {to_email}")
     except Exception as e:
         print(f"[Error Email] No se pudo enviar el correo a {to_email}: {e}")
 
@@ -110,9 +110,9 @@ def fetch_page_text(url: str) -> str:
         print(f"Excepción raspando {clean_url}: {e}")
         return ""
 
-# 4. Tarea Automática de Chequeo (Se ejecuta cada 30 min)
+# 4. Tarea Automática de Chequeo (Cada 30 minutos)
 def job_check_all_pages():
-    print("[Cron Job] Iniciando revisión automática de todas las páginas...")
+    print("[Cron Job] Revisando todas las páginas automáticamente...")
     db = SessionLocal()
     pages = db.query(PageModel).all()
 
@@ -127,7 +127,6 @@ def job_check_all_pages():
             db.commit()
             continue
 
-        # Si el contenido ha cambiado
         if current_content != page.last_content:
             page.has_changed = True
             page.last_content = current_content
@@ -135,24 +134,21 @@ def job_check_all_pages():
 
             print(f"[Cambio detectado] {page.name} ({page.url})")
             
-            # Enviar correo si el usuario introdujo un email
             if page.notify_email:
                 send_email_notification(page.notify_email, page.name, page.url)
 
     db.close()
     print("[Cron Job] Revisión finalizada.")
 
-# 5. Inicialización de App y Scheduler
+# 5. Configurar Scheduler
 scheduler = BackgroundScheduler()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Iniciar el programador de tareas al arrancar el servidor
     scheduler.add_job(job_check_all_pages, 'interval', minutes=30)
     scheduler.start()
-    print("[Scheduler] Programador automático iniciado (cada 30 minutos).")
+    print("[Scheduler] Cron activado correctamente cada 30 minutos.")
     yield
-    # Apagar el programador al detener el servidor
     scheduler.shutdown()
 
 app = FastAPI(lifespan=lifespan)
@@ -201,7 +197,6 @@ def create_page(page: PageCreate):
 
 @app.post("/api/check")
 def check_pages(device_id: str):
-    """Permite al usuario comprobar manualmente sus páginas desde la app"""
     db = SessionLocal()
     pages = db.query(PageModel).filter(PageModel.device_id == device_id).all()
     new_additions_count = 0
