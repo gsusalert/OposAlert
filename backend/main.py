@@ -75,16 +75,17 @@ def send_email_notification(to_email: str, page_name: str, page_url: str):
     except Exception as e:
         print(f"[Error Email] No se pudo enviar el correo a {to_email}: {e}")
 
-# 3. Extracción de texto optimizada y robusta para Forocoches
+# 3. Extracción de texto con goto=lastpost y seguimiento de redirecciones
 def fetch_page_text(url: str) -> str:
     clean_url = url.split('#')[0]
 
-    # Para Forocoches, aseguramos que visite la versión de último mensaje
+    # En Forocoches usamos goto=lastpost para ir siempre al último comentario publicado
     if "forocoches.com" in clean_url and "showthread.php" in clean_url:
-        if "goto=newpost" not in clean_url and "page=" in clean_url:
-            clean_url = re.sub(r'page=\d+', 'goto=newpost', clean_url)
-        elif "goto=newpost" not in clean_url:
-            clean_url += "&goto=newpost"
+        if "goto=" not in clean_url:
+            if "page=" in clean_url:
+                clean_url = re.sub(r'page=\d+', 'goto=lastpost', clean_url)
+            else:
+                clean_url += "&goto=lastpost"
 
     scraper = cloudscraper.create_scraper(
         delay=5,
@@ -104,26 +105,31 @@ def fetch_page_text(url: str) -> str:
     }
 
     try:
-        response = scraper.get(clean_url, headers=headers, timeout=20)
+        response = scraper.get(clean_url, headers=headers, allow_redirects=True, timeout=20)
         
-        # Si Cloudflare o Forocoches bloquea la respuesta
         if response.status_code != 200 or "Just a moment..." in response.text or "Challenge" in response.text:
             print(f"[Aviso Scraping] Estado {response.status_code} o bloqueo de Cloudflare en: {clean_url}")
             return ""
 
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Eliminar elementos no relevantes (scripts, estilos, navegación)
+        # Si es Forocoches, buscamos los mensajes de los posts
+        posts = soup.find_all('div', id=re.compile(r'^post_message_'))
+        if posts:
+            posts_text = " ".join([p.get_text(strip=True) for p in posts])
+            # Guardamos el total de posts y el texto concatenado
+            result = f"COUNT:{len(posts)}_TEXT:{posts_text}"
+            print(f"[Scraping Forocoches Exitoso] Encontrados {len(posts)} posts en la última página.")
+            return result
+
+        # Si es otra web genérica
         for element in soup(["script", "style", "noscript", "iframe", "header", "footer"]):
             element.decompose()
 
-        # Extraer todo el texto limpio visible en la página
         text_content = soup.get_text(separator=' ', strip=True)
-        
-        # Reducir espacios múltiples
         cleaned_text = re.sub(r'\s+', ' ', text_content)
 
-        print(f"[Scraping Exitoso] Longitud del texto extraído: {len(cleaned_text)} caracteres en {clean_url}")
+        print(f"[Scraping Generico Exitoso] Longitud: {len(cleaned_text)} caracteres.")
         return cleaned_text
 
     except Exception as e:
