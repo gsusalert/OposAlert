@@ -75,18 +75,36 @@ def send_email_notification(to_email: str, page_name: str, page_url: str):
     except Exception as e:
         print(f"[Error Email] No se pudo enviar el correo a {to_email}: {e}")
 
-# 3. Extracción de texto con goto=lastpost y seguimiento de redirecciones
+# 3. Extracción de texto optimizada (Adaptada a RSS para Forocoches)
 def fetch_page_text(url: str) -> str:
     clean_url = url.split('#')[0]
 
-    # En Forocoches usamos goto=lastpost para ir siempre al último comentario publicado
-    if "forocoches.com" in clean_url and "showthread.php" in clean_url:
-        if "goto=" not in clean_url:
-            if "page=" in clean_url:
-                clean_url = re.sub(r'page=\d+', 'goto=lastpost', clean_url)
-            else:
-                clean_url += "&goto=lastpost"
+    # Si es Forocoches, extraemos el ID del hilo y usamos su Feed RSS/XML sin bloqueo
+    thread_match = re.search(r't=(\d+)', clean_url)
+    if "forocoches.com" in clean_url and thread_match:
+        thread_id = thread_match.group(1)
+        rss_url = f"https://forocoches.com/foro/external.php?type=rss2&threadid={thread_id}"
+        
+        scraper = cloudscraper.create_scraper()
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
 
+        try:
+            res = scraper.get(rss_url, headers=headers, timeout=15)
+            if res.status_code == 200 and "<rss" in res.text.lower():
+                soup = BeautifulSoup(res.text, 'xml')
+                items = soup.find_all('item')
+                if items:
+                    # Guardamos la fecha/identificador del último ítem del RSS
+                    last_item = items[0]
+                    pub_date = last_item.find('pubDate')
+                    title = last_item.find('title')
+                    content = f"{title.text if title else ''}_{pub_date.text if pub_date else ''}"
+                    print(f"[Forocoches RSS Exitoso] Último ítem RSS: {content}")
+                    return content
+        except Exception as e:
+            print(f"[Forocoches RSS Error] Error al leer RSS, recurriendo a web normal: {e}")
+
+    # Método secundario (Web scraping estándar para otros sitios)
     scraper = cloudscraper.create_scraper(
         delay=5,
         browser={
@@ -113,16 +131,6 @@ def fetch_page_text(url: str) -> str:
 
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Si es Forocoches, buscamos los mensajes de los posts
-        posts = soup.find_all('div', id=re.compile(r'^post_message_'))
-        if posts:
-            posts_text = " ".join([p.get_text(strip=True) for p in posts])
-            # Guardamos el total de posts y el texto concatenado
-            result = f"COUNT:{len(posts)}_TEXT:{posts_text}"
-            print(f"[Scraping Forocoches Exitoso] Encontrados {len(posts)} posts en la última página.")
-            return result
-
-        # Si es otra web genérica
         for element in soup(["script", "style", "noscript", "iframe", "header", "footer"]):
             element.decompose()
 
